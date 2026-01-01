@@ -1,5 +1,4 @@
 # DEM2DSF (kubolti)
-
 ![CI](https://github.com/doublemover/kubolti/actions/workflows/ci.yml/badge.svg)
 ![coverage](https://img.shields.io/badge/coverage-100%25-brightgreen)
 
@@ -8,13 +7,12 @@
 </p>
 
 DEM2DSF is a CLI-first pipeline that turns GeoTIFF DEMs into X-Plane 12 base-mesh
-DSF tiles. It handles the GIS glue (mosaic, reproject, tile, fill) and then
-orchestrates Ortho4XP + XPTools to produce reproducible artifacts and validation
-reports.
+DSF tiles. It normalizes DEMs, orchestrates Ortho4XP builds, and validates the
+output with DSFTool plus optional XP12 raster enrichment.
 
 Feature requests are encouraged and welcome. If you want something, open an
-issue with: (1) the goal, (2) sample inputs or constraints, (3) expected outputs,
-and (4) any gotchas you already know.
+issue with: (1) the goal, (2) sample inputs or constraints, (3) expected
+outputs, and (4) any gotchas you already know.
 
 ## Quickstart
 
@@ -24,53 +22,61 @@ python -m pip install -e .
 dem2dsf --help
 ```
 
+## Documentation
+
+- `docs/README.md` for the full documentation map.
+- `docs/Ortho4XP/README.md` for Ortho4XP workflow notes and automation checks.
+- `docs/DSFTool/README.md` for DSFTool usage and gotchas.
+- `docs/presets.md`, `docs/dem_stack.md`, and `docs/patch_workflow.md` for
+  presets, DEM stacks, and patch workflows.
+
 ## Current capabilities
 
-- DEM normalization: mosaic sources, warp to EPSG:4326, tile, fill.
-- Ortho4XP runner orchestration with per-tile DEM staging and density presets.  
-- DSFTool round-trip checks + XP12 raster inventory (enrichment in progress).   
-- Normalization cache reuse keyed by inputs/params.
-- Wizard flow, overlay generators, presets (including ultra density), publish zip artifacts.
-- DSF compression with 7-Zip (optional backup of the uncompressed DSF).
-- Ortho4XP tile cfg preservation for provenance.
-- Coverage thresholds + metrics, diagnostics bundles, and per-tile runner logs.
-- Runner timeouts, retries, log streaming, and opt-in config persistence.
-- Mosaic strategy selection (full mosaic or per-tile merge).
-- Tkinter GUI launcher with persisted preferences.
+- DEM normalization pipeline (mosaic, reprojection, tiling, fill strategies)
+  with cache reuse and coverage metrics.
+- Ortho4XP runner orchestration with config overrides, retries, timeouts, and
+  per-tile logs plus optional config persistence.
+- DSFTool validation (round-trip + bounds checks) and XP12 raster inventory with
+  optional enrichment from Global Scenery.
+- Density presets and triangle guardrails (including the ultra preset).
+- AutoOrtho compatibility checks for texture references.
+- Publish packaging with optional DSF 7-Zip compression and backups.
+- Overlay generation, patch workflows, Custom Scenery scans, and cache tools.
+- Tkinter GUI for build and publish with persisted preferences.
 
 ## Roadmap highlights
 
 See `COMPLETE_PLAN.md` for the full sequence. Highlights:
-- Tighten Ortho4XP presets and autoortho ergonomics.
-- Improve XPTools integration + DSF validation coverage.
-- Expand integration/e2e coverage and performance profiling.
+- Tighten Ortho4XP presets and AutoOrtho ergonomics.
+- Improve XP12 validation coverage and diagnostics.
+- Expand integration and end-to-end coverage with performance profiling.
 
 ## External tools and discovery
 
-DEM2DSF orchestrates external tools (BYO):
+DEM2DSF orchestrates external tools you provide:
 - Ortho4XP: https://github.com/oscarpilote/Ortho4XP (target baseline 1.40)
 - XPTools: https://developer.x-plane.com/tools/xptools/ (DSFTool, DDSTool)
   - DSFTool 2.2+ is required to read 7z-compressed DSFs directly.
+- Optional: 7-Zip for DSF compression.
 
-It auto-loads `tools/tool_paths.json` when present (or set `DEM2DSF_TOOL_PATHS`).
-To install/discover common tools and write config:
+Tool discovery loads `tools/tool_paths.json` from the repo or current working
+folder, or an explicit file set in `DEM2DSF_TOOL_PATHS`.
+
+Install/build helpers:
 
 ```bash
 python scripts/install_tools.py --write-config
-```
-
-Source builds (DSFTool/DDSTool) are preferred; pass `--allow-downloads` to
-permit zip downloads if builds fail. The build script checks out XPTools_2024_5
-by default; use `--xptools-commit` to pin a specific SHA.
-
-```bash
 python scripts/build_xptools.py --install-deps --write-config
 ```
 
-If `tools/xptools` already contains the binaries (or they are on PATH), the
-script reuses them instead of rebuilding. On Windows, source builds use the
-MSVC solution (`msvc/XPTools.sln`). Set `DEM2DSF_MSBUILD_PATH` and/or
-`DEM2DSF_VCVARSALL_PATH` if detection fails.
+Source builds are preferred for XPTools; pass `--allow-downloads` or
+`--no-source` to permit zip downloads when needed.
+
+Build requirements for XPTools:
+- Windows: Visual Studio Build Tools 2017+ with MSBuild and the C++ workload.
+  Override detection with `DEM2DSF_MSBUILD_PATH` and `DEM2DSF_VCVARSALL_PATH`.
+- macOS: Xcode (xcodebuild). Install Command Line Tools if missing.
+- Linux: clang, make, and git.
 
 ## Usage guide (by purpose)
 
@@ -82,86 +88,66 @@ Tip: after install you can run either `dem2dsf ...` or `python -m dem2dsf ...`.
 dem2dsf build --dem dem.tif --tile +47+008 --output build
 ```
 
+Build outputs include `build/build_plan.json` and `build/build_report.json`.
 Use `--tile-jobs 4` to parallelize per-tile normalization work.
 
-If Ortho4XP is not auto-detected, pass a runner command:
-`--runner python scripts/ortho4xp_runner.py --ortho-root <dir>`.
-
-### Runner reliability
+### AutoOrtho mode
 
 ```bash
-dem2dsf build --dem dem.tif --tile +47+008 --output build \
-  --runner-timeout 3600 --runner-retries 1 --runner-stream-logs
+dem2dsf autoortho --dem dem.tif --tile +47+008 --ortho-root C:/Ortho4XP
 ```
 
-Runner flags can include `--persist-config` when using the bundled runner if
-you want Ortho4XP.cfg changes to stay applied after the run.
+You can also use `dem2dsf build --autoortho` to enable AutoOrtho checks.
 
-### Logging
-
-Add `--verbose` or `--quiet` for CLI log verbosity. Use `--log-file path.json`  
-to write structured JSON logs or `--log-json` to emit JSON logs on stderr.      
-
-The Ortho4XP runner writes per-tile JSON logs to
-`<output>/runner_logs/ortho4xp_<tile>.run.log` unless `--log-file` overrides it.
-
-### Coverage and diagnostics
-
-```bash
-dem2dsf build --dem dem.tif --tile +47+008 --output build \
-  --coverage-min 0.95 --coverage-hard-fail --coverage-metrics \
-  --bundle-diagnostics
-```
-
-Coverage thresholds apply to DEM coverage within each tile. Diagnostics bundles
-create `diagnostics_<timestamp>.zip` in the build directory with reports, logs,
-metrics, and profiles when available.
-
-### DEM stacks (multi-resolution)
-
-```bash
-dem2dsf build --dem-stack stack.json --tile +47+008 --output build
-```
-
-### Wizard (guided)
+### Wizard (CLI)
 
 ```bash
 dem2dsf wizard --dem dem.tif --tile +47+008 --output build --defaults
 ```
 
-### Validate / diagnose
+### Logging
+
+Use `--verbose`, `--quiet`, `--log-json`, or `--log-file path.json` to tune CLI
+logging. Ortho4XP runner logs are written under `build/runner_logs/` with
+`.stdout.log`, `.stderr.log`, `.events.json`, and the main `.run.log` per tile.
+
+### Coverage and diagnostics
 
 ```bash
-dem2dsf doctor --runner <cmd...> --dsftool <path>
-dem2dsf scan --scenery-root "X-Plane 12/Custom Scenery"
+dem2dsf build --dem dem.tif --tile +47+008 --output build \
+  --min-coverage 0.95 --coverage-hard-fail --bundle-diagnostics
+```
+
+### Validation and XP12 enrichment
+
+```bash
+dem2dsf build --dem dem.tif --tile +47+008 --output build \
+  --quality xp12-enhanced --dsftool /path/to/DSFTool \
+  --global-scenery "X-Plane 12/Global Scenery" --enrich-xp12
 ```
 
 ### Publish artifacts
 
 ```bash
-dem2dsf publish --build-dir build --output build.zip
+dem2dsf publish --build-dir build --output build.zip --dsf-7z
 ```
 
-With compressed DSFs: `--dsf-7z --sevenzip-path <path-to-7z>`.
-Add `--dsf-7z-backup` to keep `.dsf.uncompressed` backups.
+Add `--dsf-7z-backup` to keep `.dsf.uncompressed` backups or
+`--sevenzip-path <path-to-7z>` to override detection.
 
-### Patch an existing build
+### Patch and overlay
 
 ```bash
 dem2dsf patch --build-dir build --patch patch_plan.json --output patched
-```
 
-### Overlays
-
-```bash
 dem2dsf overlay --build-dir build --output overlay
 ```
 
-Use `dem2dsf overlay --help` for generator-specific options.
-
-### Ortho4XP cache cleanup
+### Scenery scan and cache
 
 ```bash
+dem2dsf scan --scenery-root "X-Plane 12/Custom Scenery"
+
 dem2dsf cache list --ortho-root "C:/Ortho4XP" --tile +47+008
 dem2dsf cache purge --ortho-root "C:/Ortho4XP" --tile +47+008 --confirm
 ```
@@ -170,7 +156,7 @@ dem2dsf cache purge --ortho-root "C:/Ortho4XP" --tile +47+008 --confirm
 
 ```bash
 dem2dsf presets list
-dem2dsf presets show usgs-13as
+dem2dsf presets show ultra
 dem2dsf presets export --output my_presets.json
 dem2dsf presets import my_presets.json
 ```
@@ -181,7 +167,7 @@ dem2dsf presets import my_presets.json
 dem2dsf gui
 ```
 
-Preferences are saved to `~/.dem2dsf/gui_prefs.json` (override with
+Preferences are stored at `~/.dem2dsf/gui_prefs.json` (override with
 `DEM2DSF_GUI_PREFS`).
 
 ### Profiling and benchmarks
@@ -194,19 +180,25 @@ python scripts/run_ci_perf.py --output-dir perf_ci --runs 1
 
 ## Development
 
-- Lint: `ruff check .`
-- Tests + coverage: `pytest --cov=dem2dsf --cov-report=term-missing`
-- E2E tests: `pytest -m e2e`
-- Integration tests (external tools + Global Scenery if available):
-  `pytest -m integration`
-- Package GUI (PyInstaller): `python scripts/build_gui.py`
+```bash
+python scripts/install_dev.py
+ruff check .
+pytest --cov=dem2dsf --cov-report=term-missing
+pytest -m e2e
+pytest -m integration
+```
+
+Package the GUI bundle with:
+
+```bash
+python scripts/build_gui.py
+```
 
 ## Dependencies
 
 - Python 3.13
-- rasterio (GDAL), pyproj, numpy, jsonschema
-- pytest, pytest-cov, ruff (dev)
-- Optional: pyinstaller + pillow (GUI bundling / PNG icons)
-- External tools (BYO): Ortho4XP 1.40+, DSFTool/DDSTool (XPTools)
-- Optional: 7-Zip for DSF compression; X-Plane Global Scenery for XP12
-  enrichment
+- Core: rasterio (GDAL), pyproj, numpy, jsonschema
+- Dev: pytest, pytest-cov, ruff, build
+- Optional: pyinstaller + pillow (GUI bundling)
+- External: Ortho4XP 1.40+, DSFTool/DDSTool (XPTools), 7-Zip for DSF compression
+- Optional data: X-Plane 12 Global Scenery for XP12 enrichment
