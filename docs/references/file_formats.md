@@ -22,6 +22,7 @@ DEM2DSF moves data through multiple formats. Understanding what each file encode
 - `tools/tool_paths.json` maps tool names to executable/script paths (dsftool, ddstool, ortho4xp, 7zip).
 - DEM stack config (`dem_stack.json`):
   - `layers`: array of `{path, priority, aoi?, nodata?}`.
+- AOI GeoJSON: defaults to EPSG:4326 when CRS metadata is missing; embed CRS metadata or pass `--aoi-crs` for overrides.
 - Patch plan (`patch_plan.json`):
   - `schema_version` + `patches` list with `tile`, `dem`, optional `aoi`, optional `nodata`.
 - Overlay report (`overlay_report.json`):

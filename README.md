@@ -84,6 +84,21 @@ dem2dsf build --dem dem.tif --tile +47+008 --output build
 Build outputs include `build/build_plan.json` and `build/build_report.json`.
 Use `--tile-jobs 4` to parallelize per-tile normalization work.
 
+Infer tiles (explicit opt-in) and apply an AOI mask:
+
+```bash
+dem2dsf build --dem dem.tif --infer-tiles --aoi area.geojson --output build
+```
+
+Use `--aoi-crs EPSG:4326` if your AOI lacks embedded CRS metadata. WGS84 is the
+preferred CRS.
+
+### Infer tiles
+
+```bash
+dem2dsf tiles --dem dem.tif --aoi area.geojson --json
+```
+
 ### AutoOrtho mode
 
 ```bash
@@ -97,6 +112,9 @@ You can also use `dem2dsf build --autoortho` to enable AutoOrtho checks.
 ```bash
 dem2dsf wizard --dem dem.tif --tile +47+008 --output build --defaults
 ```
+
+Add `--infer-tiles` to let the wizard propose tiles from DEM/AOI bounds, and
+`--aoi area.geojson` to mask tiles before the backend runs.
 
 ### Logging
 
@@ -163,6 +181,8 @@ dem2dsf gui
 Preferences are stored at `~/.dem2dsf/gui_prefs.json` (override with
 `DEM2DSF_GUI_PREFS`).
 
+The GUI supports optional AOI paths and tile inference for quick builds.
+
 ### Profiling and benchmarks
 
 ```bash
@@ -192,6 +212,7 @@ python scripts/build_gui.py
 - Python 3.13
 - Core: rasterio (GDAL), pyproj, numpy, jsonschema
 - Dev: pytest, pytest-cov, ruff, build
+- Optional: fiona (AOI shapefile support)
 - Optional: pyinstaller + pillow (GUI bundling)
 - External: Ortho4XP 1.40+, DSFTool/DDSTool (XPTools), 7-Zip for DSF compression
 - Optional data: X-Plane 12 Global Scenery for XP12 enrichment

@@ -11,9 +11,11 @@ from pathlib import Path
 from typing import Any
 
 from dem2dsf.build import run_build
+from dem2dsf.dem.stack import load_dem_stack
 from dem2dsf.density import DENSITY_PRESETS
 from dem2dsf.presets import get_preset, list_presets
 from dem2dsf.publish import publish_build
+from dem2dsf.tile_inference import infer_tiles
 from dem2dsf.tools.config import load_tool_paths, ortho_root_from_paths
 from dem2dsf.xplane_paths import parse_tile
 
@@ -215,6 +217,9 @@ def build_form_to_request(
         "quality": values.get("quality", "compat"),
         "density": values.get("density", "medium"),
         "autoortho": bool(values.get("autoortho", False)),
+        "aoi": values.get("aoi_path") or None,
+        "aoi_crs": values.get("aoi_crs") or None,
+        "infer_tiles": bool(values.get("infer_tiles", False)),
         "target_crs": values.get("target_crs") or "EPSG:4326",
         "resampling": values.get("resampling", "bilinear"),
         "target_resolution": parse_optional_float(values.get("target_resolution", "")),
@@ -312,7 +317,10 @@ def launch_gui() -> None:
         "preset": tk.StringVar(),
         "dems": tk.StringVar(),
         "dem_stack": tk.StringVar(),
+        "aoi_path": tk.StringVar(),
+        "aoi_crs": tk.StringVar(),
         "tiles": tk.StringVar(),
+        "infer_tiles": tk.BooleanVar(value=False),
         "output_dir": tk.StringVar(value="build"),
         "quality": tk.StringVar(value="compat"),
         "density": tk.StringVar(value="medium"),
@@ -399,6 +407,18 @@ def launch_gui() -> None:
         if path:
             build_vars["dem_stack"].set(path)
 
+    def browse_aoi() -> None:
+        path = filedialog.askopenfilename(
+            title="Select AOI polygon",
+            filetypes=[
+                ("GeoJSON", "*.json;*.geojson"),
+                ("Shapefile", "*.shp"),
+                ("All files", "*.*"),
+            ],
+        )
+        if path:
+            build_vars["aoi_path"].set(path)
+
     def browse_output_dir() -> None:
         path = filedialog.askdirectory(title="Select output directory")
         if path:
@@ -438,15 +458,54 @@ def launch_gui() -> None:
         if path:
             build_vars["metrics_json"].set(path)
 
+    def _infer_tiles_for_values(values: dict[str, Any]):
+        dem_paths = [Path(path) for path in parse_list(values.get("dems", ""))]
+        dem_stack = values.get("dem_stack") or ""
+        if not dem_paths and dem_stack:
+            stack = load_dem_stack(Path(dem_stack))
+            dem_paths = [layer.path for layer in stack.layers]
+        if not dem_paths:
+            raise ValueError("Provide DEMs or a DEM stack to infer tiles.")
+        aoi_path = values.get("aoi_path") or None
+        aoi_crs = values.get("aoi_crs") or None
+        return infer_tiles(
+            dem_paths,
+            aoi_path=Path(aoi_path) if aoi_path else None,
+            aoi_crs=aoi_crs or None,
+        )
+
+    def on_infer_tiles() -> None:
+        values = {key: var.get() for key, var in build_vars.items()}
+        try:
+            inference = _infer_tiles_for_values(values)
+        except Exception as exc:
+            messagebox.showerror("Tile inference failed", str(exc))
+            return
+        if inference.warnings:
+            for warning in inference.warnings:
+                log_message(f"Warning: {warning}")
+        build_vars["tiles"].set(", ".join(inference.tiles))
+        log_message(f"Inferred {len(inference.tiles)} tile(s).")
+
     def on_build() -> None:
         values = {key: var.get() for key, var in build_vars.items()}
         try:
             dem_paths, tiles, output_dir, options = build_form_to_request(values)
-            if not tiles:
-                messagebox.showerror("Missing input", "Provide tile names.")
-                return
             if not dem_paths and not options.get("dem_stack_path"):
                 messagebox.showerror("Missing input", "Provide DEMs or a DEM stack.")
+                return
+            if not tiles and options.get("infer_tiles"):
+                inference = _infer_tiles_for_values(values)
+                if inference.warnings:
+                    for warning in inference.warnings:
+                        log_message(f"Warning: {warning}")
+                tiles = inference.tiles
+                build_vars["tiles"].set(", ".join(tiles))
+            if not tiles:
+                messagebox.showerror(
+                    "Missing input",
+                    "Provide tile names or enable tile inference.",
+                )
                 return
             invalid_tiles = _invalid_tiles(tiles)
             if invalid_tiles:
@@ -528,8 +587,37 @@ def launch_gui() -> None:
         ttk.Button(build_frame, text="Browse", command=browse_dem_stack),
     )
     row += 1
+    aoi_entry = ttk.Entry(build_frame, textvariable=build_vars["aoi_path"])
+    add_row_with_button(
+        build_frame,
+        "AOI polygon (optional)",
+        aoi_entry,
+        row,
+        ttk.Button(build_frame, text="Browse", command=browse_aoi),
+    )
+    row += 1
+    aoi_crs_entry = ttk.Entry(build_frame, textvariable=build_vars["aoi_crs"])
+    add_row(
+        build_frame,
+        "AOI CRS (optional, preferred: EPSG:4326)",
+        aoi_crs_entry,
+        row,
+    )
+    row += 1
     tiles_entry = ttk.Entry(build_frame, textvariable=build_vars["tiles"])
-    add_row(build_frame, "Tiles (comma-separated)", tiles_entry, row)
+    add_row_with_button(
+        build_frame,
+        "Tiles (comma-separated)",
+        tiles_entry,
+        row,
+        ttk.Button(build_frame, text="Infer", command=on_infer_tiles),
+    )
+    row += 1
+    ttk.Checkbutton(
+        build_frame,
+        text="Infer tiles from DEM/AOI when empty",
+        variable=build_vars["infer_tiles"],
+    ).grid(row=row, column=1, sticky="w", padx=4, pady=4)
     row += 1
     output_entry = ttk.Entry(build_frame, textvariable=build_vars["output_dir"])
     add_row_with_button(

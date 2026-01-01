@@ -5,6 +5,7 @@ import json
 import runpy
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -60,6 +61,24 @@ def test_cli_build_success(monkeypatch) -> None:
 
     result = cli.main(["build", "--dem", "dem.tif", "--tile", "+47+008"])
     assert result == 0
+
+
+def test_cli_build_infers_tiles(monkeypatch) -> None:
+    captured = {}
+
+    def fake_run_build(*, tiles, **_kwargs):
+        captured["tiles"] = tiles
+        return BuildResult(build_plan={}, build_report={"errors": []})
+
+    def fake_infer_tiles(*_args, **_kwargs):
+        return SimpleNamespace(tiles=["+47+008"], warnings=())
+
+    monkeypatch.setattr(cli, "run_build", fake_run_build)
+    monkeypatch.setattr(cli, "infer_tiles", fake_infer_tiles)
+
+    result = cli.main(["build", "--dem", "dem.tif", "--infer-tiles"])
+    assert result == 0
+    assert captured["tiles"] == ["+47+008"]
 
 
 def test_cli_build_profile_options(monkeypatch) -> None:
@@ -203,6 +222,25 @@ def test_cli_wizard(monkeypatch, tmp_path: Path) -> None:
     )
     assert result == 0
     assert called["ok"] is True
+
+
+def test_cli_tiles_command_json(monkeypatch, capsys) -> None:
+    def fake_infer_tiles(*_args, **_kwargs):
+        return SimpleNamespace(
+            tiles=["+47+008"],
+            bounds=(8.0, 47.0, 9.0, 48.0),
+            dem_bounds=None,
+            aoi_bounds=None,
+            coverage={"+47+008": 1.0},
+            warnings=(),
+        )
+
+    monkeypatch.setattr(cli, "infer_tiles", fake_infer_tiles)
+
+    result = cli.main(["tiles", "--dem", "dem.tif", "--json"])
+    assert result == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["tiles"] == ["+47+008"]
 
 
 def test_cli_doctor_error(monkeypatch) -> None:

@@ -11,6 +11,7 @@ python -m dem2dsf gui
 ## Build tab highlights
 - Presets can populate backend defaults (quality, density, resampling).
 - DEMs can be selected via the file picker or via a DEM stack JSON.
+- AOI polygons (GeoJSON/SHP) can be selected for masking; EPSG:4326 is preferred when CRS metadata is missing.
 - Ortho4XP/DSFTool fields are optional if `tools/tool_paths.json` is
   present (or `DEM2DSF_TOOL_PATHS` is set).
 - Ortho4XP python points at the interpreter used by Ortho4XP (optional).
@@ -18,6 +19,7 @@ python -m dem2dsf gui
 - Runner override accepts a custom command when you need a non-default launcher.
 - Runner timeout/retry/stream toggles control reliability and log streaming.
 - Persist Ortho4XP.cfg keeps config overrides after the run (default restores).
+- Use the Infer button or infer checkbox to populate tiles from DEM/AOI bounds (explicit opt-in).
 - Override destination nodata and triangle guardrails when tuning raster output.
 - Mosaic strategy and coverage thresholds tune normalization behavior.
 - Diagnostics bundles capture reports/logs/metrics into a zip.

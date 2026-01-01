@@ -7,6 +7,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from dem2dsf.dem.aoi import load_aoi_shapes as _load_aoi_shapes
+
 
 @dataclass(frozen=True)
 class DemLayer:
@@ -79,20 +81,5 @@ def stack_to_options(stack: DemStack) -> dict[str, Any]:
 
 
 def load_aoi_shapes(path: Path) -> list[dict[str, Any]]:
-    """Load AOI polygon geometries from a GeoJSON file."""
-    data = json.loads(path.read_text(encoding="utf-8"))
-    shapes: list[dict[str, Any]] = []
-    if data.get("type") == "FeatureCollection":
-        for feature in data.get("features", []):
-            geometry = feature.get("geometry")
-            if geometry:
-                shapes.append(geometry)
-    elif data.get("type") == "Feature":
-        geometry = data.get("geometry")
-        if geometry:
-            shapes.append(geometry)
-    elif data.get("type") in {"Polygon", "MultiPolygon"}:
-        shapes.append(data)
-    if not shapes:
-        raise ValueError(f"No polygon geometries found in {path}")
-    return shapes
+    """Load AOI polygon geometries from a GeoJSON or shapefile."""
+    return _load_aoi_shapes(path)

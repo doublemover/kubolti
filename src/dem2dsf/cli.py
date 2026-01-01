@@ -12,6 +12,7 @@ from pathlib import Path
 
 from dem2dsf import __version__
 from dem2dsf.build import run_build
+from dem2dsf.dem.stack import load_dem_stack
 from dem2dsf.density import DENSITY_PRESETS
 from dem2dsf.doctor import run_doctor
 from dem2dsf.logging_utils import LogOptions, configure_logging
@@ -30,6 +31,7 @@ from dem2dsf.presets import (
 )
 from dem2dsf.publish import find_sevenzip, publish_build
 from dem2dsf.scenery import scan_custom_scenery
+from dem2dsf.tile_inference import infer_tiles
 from dem2dsf.tools.config import load_tool_paths, ortho_root_from_paths
 from dem2dsf.tools.ortho4xp import (
     CACHE_CATEGORIES,
@@ -78,6 +80,9 @@ class BuildOptions:
     bundle_diagnostics: bool
     dry_run: bool
     dem_stack_path: str | None
+    aoi: str | None
+    aoi_crs: str | None
+    infer_tiles: bool
     profile: bool
     metrics_json: str | None
 
@@ -115,6 +120,9 @@ class BuildOptions:
             "bundle_diagnostics": self.bundle_diagnostics,
             "dry_run": self.dry_run,
             "dem_stack_path": self.dem_stack_path,
+            "aoi": self.aoi,
+            "aoi_crs": self.aoi_crs,
+            "infer_tiles": self.infer_tiles,
             "profile": self.profile,
             "metrics_json": self.metrics_json,
         }
@@ -164,6 +172,9 @@ def _build_options_from_args(
         bundle_diagnostics=bool(getattr(args, "bundle_diagnostics", False)),
         dry_run=dry_run if dry_run is not None else bool(getattr(args, "dry_run", False)),
         dem_stack_path=getattr(args, "dem_stack", None),
+        aoi=getattr(args, "aoi", None),
+        aoi_crs=getattr(args, "aoi_crs", None),
+        infer_tiles=bool(getattr(args, "infer_tiles", False)),
         profile=bool(getattr(args, "profile", False)),
         metrics_json=getattr(args, "metrics_json", None),
     )
@@ -178,6 +189,19 @@ def _add_build_parser(subparsers: argparse._SubParsersAction) -> None:
         help="Path to a JSON DEM stack definition.",
     )
     build.add_argument("--tile", action="append", help="Tile name like +DD+DDD.")
+    build.add_argument(
+        "--infer-tiles",
+        action="store_true",
+        help="Infer tiles from DEM/AOI bounds when --tile is omitted.",
+    )
+    build.add_argument(
+        "--aoi",
+        help="Optional AOI polygon (GeoJSON or SHP) to mask tiles.",
+    )
+    build.add_argument(
+        "--aoi-crs",
+        help="Override AOI CRS when none is embedded (preferred: EPSG:4326).",
+    )
     build.add_argument(
         "--quality",
         choices=("compat", "xp12-enhanced"),
@@ -367,6 +391,19 @@ def _add_wizard_parser(subparsers: argparse._SubParsersAction) -> None:
     )
     wizard.add_argument("--tile", action="append", help="Tile name like +DD+DDD.")
     wizard.add_argument(
+        "--infer-tiles",
+        action="store_true",
+        help="Infer tiles from DEM/AOI bounds when --tile is omitted.",
+    )
+    wizard.add_argument(
+        "--aoi",
+        help="Optional AOI polygon (GeoJSON or SHP) to mask tiles.",
+    )
+    wizard.add_argument(
+        "--aoi-crs",
+        help="Override AOI CRS when none is embedded (preferred: EPSG:4326).",
+    )
+    wizard.add_argument(
         "--quality",
         choices=("compat", "xp12-enhanced"),
         default="compat",
@@ -543,6 +580,26 @@ def _add_wizard_parser(subparsers: argparse._SubParsersAction) -> None:
         "--bundle-diagnostics",
         action="store_true",
         help="Bundle diagnostics artifacts after the build completes.",
+    )
+
+
+def _add_tiles_parser(subparsers: argparse._SubParsersAction) -> None:
+    """Register the tile inference subcommand."""
+    tiles = subparsers.add_parser("tiles", help="Infer tiles from DEM/AOI bounds.")
+    tiles.add_argument("--dem", action="append", help="Path to a DEM input file.")
+    tiles.add_argument(
+        "--dem-stack",
+        help="Path to a JSON DEM stack definition.",
+    )
+    tiles.add_argument("--aoi", help="Optional AOI polygon (GeoJSON or SHP).")
+    tiles.add_argument(
+        "--aoi-crs",
+        help="Override AOI CRS when none is embedded (preferred: EPSG:4326).",
+    )
+    tiles.add_argument(
+        "--json",
+        action="store_true",
+        help="Emit JSON output with bounds and coverage estimates.",
     )
 
 
@@ -1071,6 +1128,7 @@ def main(argv: list[str] | None = None) -> int:
     subparsers = parser.add_subparsers(dest="command", required=True)
     _add_build_parser(subparsers)
     _add_wizard_parser(subparsers)
+    _add_tiles_parser(subparsers)
     _add_doctor_parser(subparsers)
     _add_autoortho_parser(subparsers)
     _add_overlay_parser(subparsers)
@@ -1102,14 +1160,30 @@ def main(argv: list[str] | None = None) -> int:
         launch_gui()
         return 0
     if args.command == "build":
-        if not args.tile:
-            parser.error("--tile is required for build")
         if not args.dem and not args.dem_stack:
             parser.error("--dem or --dem-stack is required for build")
+        dem_paths = [Path(path) for path in (args.dem or [])]
+        if args.dem_stack:
+            stack = load_dem_stack(Path(args.dem_stack))
+            dem_paths = [layer.path for layer in stack.layers]
+        tiles = args.tile or []
+        if not tiles:
+            if not args.infer_tiles:
+                parser.error("--tile is required for build unless --infer-tiles is set")
+            inference = infer_tiles(
+                dem_paths,
+                aoi_path=Path(args.aoi) if args.aoi else None,
+                aoi_crs=args.aoi_crs,
+            )
+            for warning in inference.warnings:
+                LOGGER.warning("%s", warning)
+            tiles = inference.tiles
+            if not tiles:
+                parser.error("No tiles inferred from DEM/AOI bounds.")
         options = _build_options_from_args(args).as_dict()
         result = run_build(
-            dem_paths=[Path(path) for path in (args.dem or [])],
-            tiles=args.tile,
+            dem_paths=dem_paths,
+            tiles=tiles,
             backend_name="ortho4xp",
             output_dir=Path(args.output),
             options=options,
@@ -1132,6 +1206,34 @@ def main(argv: list[str] | None = None) -> int:
             defaults=args.defaults,
         )
         LOGGER.info("Wizard completed. Build plan and report written.")
+        return 0
+    if args.command == "tiles":
+        if not args.dem and not args.dem_stack:
+            parser.error("--dem or --dem-stack is required for tiles")
+        dem_paths = [Path(path) for path in (args.dem or [])]
+        if args.dem_stack:
+            stack = load_dem_stack(Path(args.dem_stack))
+            dem_paths = [layer.path for layer in stack.layers]
+        inference = infer_tiles(
+            dem_paths,
+            aoi_path=Path(args.aoi) if args.aoi else None,
+            aoi_crs=args.aoi_crs,
+        )
+        for warning in inference.warnings:
+            LOGGER.warning("%s", warning)
+        if args.json:
+            payload = {
+                "tiles": inference.tiles,
+                "bounds": inference.bounds,
+                "dem_bounds": inference.dem_bounds,
+                "aoi_bounds": inference.aoi_bounds,
+                "coverage": inference.coverage,
+                "warnings": list(inference.warnings),
+            }
+            print(json.dumps(payload, indent=2))
+        else:
+            for tile in inference.tiles:
+                print(tile)
         return 0
     if args.command == "doctor":
         results = run_doctor(

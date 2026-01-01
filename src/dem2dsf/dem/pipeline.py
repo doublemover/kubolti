@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import ExitStack
@@ -17,6 +18,7 @@ from rasterio.features import geometry_mask
 from rasterio.merge import merge
 
 from dem2dsf.dem.adapter import BackendProfile, apply_backend_profile
+from dem2dsf.dem.aoi import load_aoi, load_aoi_shapes, reproject_shapes
 from dem2dsf.dem.fill import (
     fill_with_constant,
     fill_with_fallback,
@@ -25,7 +27,7 @@ from dem2dsf.dem.fill import (
 from dem2dsf.dem.info import inspect_dem
 from dem2dsf.dem.models import CoverageMetrics, DemInfo, TileResult
 from dem2dsf.dem.mosaic import build_mosaic
-from dem2dsf.dem.stack import DemStack, load_aoi_shapes
+from dem2dsf.dem.stack import DemStack
 from dem2dsf.dem.tiling import tile_bounds, tile_bounds_in_crs, write_tile_dem
 from dem2dsf.dem.warp import warp_dem
 
@@ -110,9 +112,19 @@ def _run_tile_jobs(
     return [results[tile] for tile in tiles]
 
 
-def _apply_aoi_mask(tile_path: Path, shapes: list[dict[str, object]], nodata: float) -> None:
+LOGGER = logging.getLogger("dem2dsf.dem.pipeline")
+
+
+def _apply_aoi_mask(
+    tile_path: Path,
+    shapes: list[dict[str, object]],
+    nodata: float | None = None,
+) -> None:
     """Apply an AOI mask to a tile, setting masked pixels to nodata."""
     with rasterio.open(tile_path, "r+") as dataset:
+        nodata_value = nodata if nodata is not None else dataset.nodata
+        if nodata_value is None:
+            raise ValueError("AOI mask requires a nodata value.")
         data = dataset.read(1)
         mask = geometry_mask(
             shapes,
@@ -123,7 +135,7 @@ def _apply_aoi_mask(tile_path: Path, shapes: list[dict[str, object]], nodata: fl
         if not mask.any():
             return
         data = data.copy()
-        data[mask] = nodata
+        data[mask] = nodata_value
         dataset.write(data, 1)
 
 
@@ -303,6 +315,8 @@ def normalize_for_tiles(
     continue_on_error: bool = False,
     coverage_metrics: bool = True,
     mosaic_strategy: str = "full",
+    aoi_path: Path | None = None,
+    aoi_crs: str | None = None,
 ) -> NormalizationResult:
     """Normalize DEM inputs into per-tile artifacts."""
     dem_paths = tuple(dem_paths)
@@ -326,6 +340,13 @@ def normalize_for_tiles(
         dst_nodata=effective_nodata,
         label="primary",
     )
+
+    aoi_shapes: list[dict[str, object]] | None = None
+    if aoi_path:
+        aoi_data = load_aoi(aoi_path, crs=aoi_crs)
+        for warning in aoi_data.warnings:
+            LOGGER.warning("%s", warning)
+        aoi_shapes = reproject_shapes(aoi_data.shapes, aoi_data.crs, target_crs)
 
     primary_sources = warped_paths
     if len(warped_paths) > 1 and mosaic_strategy == "full":
@@ -437,6 +458,9 @@ def normalize_for_tiles(
             final_path = tile_dir / tile / f"{tile}.tif"
             apply_backend_profile(raw_path, final_path, backend_profile)
 
+        if aoi_shapes:
+            _apply_aoi_mask(final_path, aoi_shapes)
+
         if coverage_metrics:
             total_after, nodata_after, coverage_after = _coverage_stats(final_path, None)
         else:
@@ -506,6 +530,8 @@ def normalize_stack_for_tiles(
     continue_on_error: bool = False,
     coverage_metrics: bool = True,
     mosaic_strategy: str = "full",
+    aoi_path: Path | None = None,
+    aoi_crs: str | None = None,
 ) -> NormalizationResult:
     """Normalize a DEM stack into per-tile artifacts."""
     layers = stack.sorted_layers()
@@ -563,6 +589,13 @@ def normalize_stack_for_tiles(
     for _, _, _, aoi in warped_layers:
         if aoi and aoi not in aoi_shapes:
             aoi_shapes[aoi] = load_aoi_shapes(aoi)
+
+    global_aoi_shapes: list[dict[str, object]] | None = None
+    if aoi_path:
+        aoi_data = load_aoi(aoi_path, crs=aoi_crs)
+        for warning in aoi_data.warnings:
+            LOGGER.warning("%s", warning)
+        global_aoi_shapes = reproject_shapes(aoi_data.shapes, aoi_data.crs, target_crs)
 
     tile_results = []
     tile_dir = work_dir / "tiles"
@@ -656,6 +689,9 @@ def normalize_stack_for_tiles(
         if backend_profile:
             final_path = tile_dir / tile / f"{tile}.tif"
             apply_backend_profile(raw_path, final_path, backend_profile)
+
+        if global_aoi_shapes:
+            _apply_aoi_mask(final_path, global_aoi_shapes)
 
         if coverage_metrics:
             total_after, nodata_after, coverage_after = _coverage_stats(final_path, None)

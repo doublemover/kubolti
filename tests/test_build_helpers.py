@@ -556,6 +556,8 @@ def test_run_build_uses_normalization_cache(monkeypatch, tmp_path: Path) -> None
         fill_value=0.0,
         backend_profile=None,
         dem_stack=None,
+        aoi=None,
+        aoi_crs=None,
     )
     cache = build.NormalizationCache(
         version=build.CACHE_VERSION,

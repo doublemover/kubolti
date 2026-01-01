@@ -67,6 +67,8 @@ def _normalization_cache_options(
     fill_value: float,
     backend_profile: object | None,
     dem_stack: Mapping[str, Any] | None,
+    aoi: str | None,
+    aoi_crs: str | None,
 ) -> dict[str, Any]:
     """Return the normalized cache options payload."""
     return {
@@ -78,6 +80,8 @@ def _normalization_cache_options(
         "fill_value": fill_value,
         "backend_profile": getattr(backend_profile, "name", None),
         "dem_stack": dict(dem_stack) if dem_stack else None,
+        "aoi": aoi,
+        "aoi_crs": aoi_crs,
     }
 
 
@@ -256,6 +260,9 @@ def _validate_build_inputs(
     for path in dem_list:
         if not path.exists() and not dry_run:
             raise ValueError(f"DEM not found: {path}")
+    aoi_path = options.get("aoi")
+    if aoi_path and not dry_run and not Path(aoi_path).exists():
+        raise ValueError(f"AOI not found: {aoi_path}")
     if not options.get("normalize", True):
         tile_dem_paths = options.get("tile_dem_paths") or {}
         tile_dem_complete = bool(tile_dem_paths) and all(
@@ -653,6 +660,7 @@ def run_build(
                 tiles=tiles,
                 dem_paths=[str(p) for p in dem_paths],
                 options=options,
+                aoi=options.get("aoi"),
             )
             report = build_report(
                 backend=backend_spec,
@@ -691,6 +699,8 @@ def run_build(
                     fill_value=fill_value,
                     backend_profile=backend_profile,
                     dem_stack=options.get("dem_stack"),
+                    aoi=options.get("aoi"),
+                    aoi_crs=options.get("aoi_crs"),
                 )
                 fallback_sources = fallback_dem_paths if fill_strategy == "fallback" else []
                 normalization_cache = load_normalization_cache(output_dir / "normalized")
@@ -729,6 +739,8 @@ def run_build(
                                 continue_on_error=continue_on_error,
                                 coverage_metrics=coverage_metrics_enabled,
                                 mosaic_strategy=mosaic_strategy,
+                                aoi_path=Path(options["aoi"]) if options.get("aoi") else None,
+                                aoi_crs=options.get("aoi_crs"),
                             )
                         else:
                             normalization = normalize_for_tiles(
@@ -747,6 +759,8 @@ def run_build(
                                 continue_on_error=continue_on_error,
                                 coverage_metrics=coverage_metrics_enabled,
                                 mosaic_strategy=mosaic_strategy,
+                                aoi_path=Path(options["aoi"]) if options.get("aoi") else None,
+                                aoi_crs=options.get("aoi_crs"),
                             )
                         normalization_errors = dict(normalization.errors)
                         if normalization_errors:
@@ -789,6 +803,7 @@ def run_build(
                         tiles=requested_tiles,
                         dem_paths=[str(p) for p in dem_paths],
                         options=options,
+                        aoi=options.get("aoi"),
                     )
                     tile_statuses = [
                         {
@@ -854,6 +869,9 @@ def run_build(
         raise RuntimeError("Build did not produce a report.")
 
     report = _attach_performance(dict(result.build_report), perf, output_dir, options)
+    inputs = result.build_plan.get("inputs") if result.build_plan else None
+    if inputs:
+        report = {**report, "inputs": inputs}
     result = BuildResult(build_plan=result.build_plan, build_report=report)
     bundle_path = None
     if options.get("bundle_diagnostics"):

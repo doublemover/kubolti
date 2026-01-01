@@ -22,6 +22,11 @@ class DemInfo:
     nodata: float | None
     resolution: Resolution
     dtype: str
+    vertical_units: str | None
+    min_elevation: float | None
+    max_elevation: float | None
+    nan_ratio: float | None
+    nodata_ratio: float | None
 
 
 @dataclass(frozen=True)

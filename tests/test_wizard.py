@@ -5,6 +5,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+import numpy as np
 import pytest
 
 from dem2dsf.wizard import (
@@ -17,6 +18,7 @@ from dem2dsf.wizard import (
     _prompt_optional_str,
     run_wizard,
 )
+from tests.utils import write_raster
 
 
 def test_wizard_defaults(tmp_path) -> None:
@@ -50,6 +52,7 @@ def test_wizard_interactive(monkeypatch, tmp_path) -> None:
         [
             "",  # stack path
             "dem.tif",
+            "",  # aoi path
             "+47+008",
             "",  # output dir
             "",  # runner override
@@ -101,7 +104,12 @@ def test_wizard_interactive(monkeypatch, tmp_path) -> None:
 
 def test_wizard_interactive_stack(monkeypatch, tmp_path) -> None:
     layer_path = tmp_path / "layer.tif"
-    layer_path.write_text("stub", encoding="utf-8")
+    write_raster(
+        layer_path,
+        np.ones((2, 2), dtype=np.int16),
+        bounds=(0.0, 0.0, 1.0, 1.0),
+        nodata=-9999,
+    )
     stack_path = tmp_path / "stack.json"
     stack_path.write_text(
         json.dumps({"layers": [{"path": str(layer_path), "priority": 0}]}),
@@ -110,6 +118,7 @@ def test_wizard_interactive_stack(monkeypatch, tmp_path) -> None:
     inputs = iter(
         [
             str(stack_path),
+            "",  # aoi path
             "+47+008",
             "",  # output dir
             "",  # runner override
@@ -162,6 +171,7 @@ def test_wizard_interactive_applies_options(monkeypatch, tmp_path) -> None:
         [
             "",  # stack path
             "dem.tif",
+            "",  # aoi path
             "+47+008",
             "custom_out",
             "python runner.py --demo",
@@ -281,7 +291,7 @@ def test_prompt_helpers(monkeypatch) -> None:
 
 
 def test_wizard_defaults_requires_tile(tmp_path) -> None:
-    with pytest.raises(ValueError, match="Defaults mode requires --tile"):
+    with pytest.raises(ValueError, match="Defaults mode requires --tile values or --infer-tiles"):
         run_wizard(
             dem_paths=["dem.tif"],
             tiles=None,
@@ -307,6 +317,7 @@ def test_wizard_fallback_requires_paths(monkeypatch, tmp_path) -> None:
         [
             "",  # stack path
             "dem.tif",
+            "",  # aoi path
             "+47+008",
             "",  # output dir
             "",  # runner override
@@ -361,7 +372,7 @@ def test_wizard_defaults_runs_build(monkeypatch, tmp_path) -> None:
 
 
 def test_wizard_requires_tiles(monkeypatch, tmp_path) -> None:
-    inputs = iter(["", "dem.tif", ""])
+    inputs = iter(["", "dem.tif", "", ""])
     monkeypatch.setattr("builtins.input", lambda *_: next(inputs))
 
     with pytest.raises(ValueError, match="Wizard requires tiles"):

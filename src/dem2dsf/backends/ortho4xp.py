@@ -47,6 +47,7 @@ class Ortho4XPBackend:
             tiles=request.tiles,
             dem_paths=[str(path) for path in request.dem_paths],
             options=options,
+            aoi=options.get("aoi"),
         )
 
         runner = _normalize_runner(options.get("runner"))

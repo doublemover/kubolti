@@ -2,13 +2,18 @@
 
 from __future__ import annotations
 
+import math
 import os
 import shlex
 from pathlib import Path
 from typing import Any, Mapping
 
 from dem2dsf.build import run_build
+from dem2dsf.dem.info import inspect_dem
+from dem2dsf.dem.models import DemInfo
+from dem2dsf.dem.stack import load_dem_stack
 from dem2dsf.density import DENSITY_PRESETS
+from dem2dsf.tile_inference import infer_tiles
 
 FILL_CHOICES = ("none", "constant", "interpolate", "fallback")
 RESAMPLING_CHOICES = ("nearest", "bilinear", "cubic", "average")
@@ -100,6 +105,97 @@ def _prompt_command(prompt: str, default: object) -> list[str] | None:
     return shlex.split(value, posix=os.name != "nt")
 
 
+def _resolution_to_meters(info: DemInfo) -> float | None:
+    if info.crs is None:
+        return None
+    res_x, res_y = info.resolution
+    if info.crs.upper() in {"EPSG:4326", "EPSG:4258"}:
+        mid_lat = (info.bounds[1] + info.bounds[3]) / 2.0
+        meters_per_deg_lat = 111_320.0
+        meters_per_deg_lon = meters_per_deg_lat * math.cos(math.radians(mid_lat))
+        if meters_per_deg_lon <= 0:
+            meters_per_deg_lon = meters_per_deg_lat
+        return max(res_x * meters_per_deg_lon, res_y * meters_per_deg_lat)
+    return max(res_x, res_y)
+
+
+def _recommend_density(infos: list[DemInfo]) -> str | None:
+    resolutions = [value for info in infos if (value := _resolution_to_meters(info))]
+    if not resolutions:
+        return None
+    resolution = min(resolutions)
+    if resolution <= 5:
+        return "ultra"
+    if resolution <= 15:
+        return "high"
+    if resolution <= 30:
+        return "medium"
+    return "low"
+
+
+def _inspect_dem_paths(paths: list[Path]) -> list[DemInfo]:
+    infos: list[DemInfo] = []
+    for path in paths:
+        if not path.exists():
+            print(f"Warning: DEM not found for inspection: {path}")
+            continue
+        infos.append(inspect_dem(path, sample=True))
+    return infos
+
+
+def _dem_warnings(info: DemInfo) -> list[str]:
+    warnings: list[str] = []
+    if info.crs is None:
+        warnings.append(f"{info.path}: missing CRS (assume EPSG:4326 or override).")
+    if info.nodata is None:
+        warnings.append(f"{info.path}: missing nodata (AOI masking needs one).")
+    if info.vertical_units and info.vertical_units.lower() not in {"m", "meter", "meters"}:
+        warnings.append(f"{info.path}: vertical units look non-metric ({info.vertical_units}).")
+    resolution = _resolution_to_meters(info)
+    if resolution is not None and resolution < 1:
+        warnings.append(f"{info.path}: very fine resolution (~{resolution:.2f}m).")
+    if resolution is not None and resolution > 500:
+        warnings.append(f"{info.path}: very coarse resolution (~{resolution:.1f}m).")
+    if info.min_elevation is not None and info.max_elevation is not None:
+        if info.min_elevation < -1000 or info.max_elevation > 9000:
+            warnings.append(
+                f"{info.path}: elevation range {info.min_elevation:.1f}.."
+                f"{info.max_elevation:.1f} looks suspect."
+            )
+    if info.nan_ratio is not None and info.nan_ratio > 0.01:
+        warnings.append(f"{info.path}: {info.nan_ratio:.1%} NaN samples detected.")
+    if info.nodata_ratio is not None and info.nodata_ratio > 0.2:
+        warnings.append(f"{info.path}: {info.nodata_ratio:.1%} nodata coverage in sample.")
+    return warnings
+
+
+def _print_dem_summary(infos: list[DemInfo]) -> None:
+    for info in infos:
+        print(f"DEM: {info.path}")
+        print(f"  CRS: {info.crs or 'missing'}")
+        print(f"  Bounds: {info.bounds}")
+        print(f"  Resolution: {info.resolution}")
+        print(f"  Nodata: {info.nodata}")
+        print(f"  Dtype: {info.dtype}")
+        if info.vertical_units:
+            print(f"  Vertical units: {info.vertical_units}")
+        if info.min_elevation is not None and info.max_elevation is not None:
+            print(f"  Elevation range: {info.min_elevation:.1f}..{info.max_elevation:.1f}")
+
+
+def _print_tile_estimates(tiles: list[str], coverage: dict[str, float]) -> None:
+    if not tiles:
+        return
+    print("Inferred tiles (coverage estimates):")
+    limit = 20
+    for index, tile in enumerate(tiles):
+        if index >= limit:
+            print(f"  ... and {len(tiles) - limit} more")
+            break
+        ratio = coverage.get(tile, 0.0)
+        print(f"  {tile}: {ratio:.1%}")
+
+
 def run_wizard(
     *,
     dem_paths: list[str] | None,
@@ -110,9 +206,27 @@ def run_wizard(
 ) -> None:
     """Run the interactive wizard and execute a build."""
     stack_path = options.get("dem_stack_path")
+    aoi_path = options.get("aoi")
+    aoi_crs = options.get("aoi_crs")
+    infer_tiles_flag = bool(options.get("infer_tiles", False))
     if defaults:
         if not tiles:
-            raise ValueError("Defaults mode requires --tile values.")
+            if not infer_tiles_flag:
+                raise ValueError("Defaults mode requires --tile values or --infer-tiles.")
+            if not dem_paths and not stack_path:
+                raise ValueError("Defaults mode requires --dem or --dem-stack values.")
+            dem_path_list = [Path(path) for path in (dem_paths or [])]
+            if not dem_path_list and stack_path:
+                stack = load_dem_stack(Path(stack_path))
+                dem_path_list = [layer.path for layer in stack.layers]
+            inference = infer_tiles(
+                dem_path_list,
+                aoi_path=Path(aoi_path) if aoi_path else None,
+                aoi_crs=aoi_crs,
+            )
+            tiles = inference.tiles
+            if not tiles:
+                raise ValueError("Defaults mode could not infer any tiles.")
         if not dem_paths and not stack_path:
             raise ValueError("Defaults mode requires --dem or --dem-stack values.")
         run_build(
@@ -120,7 +234,7 @@ def run_wizard(
             tiles=tiles,
             backend_name="ortho4xp",
             output_dir=output_dir,
-            options=options,
+            options={**options, "aoi": aoi_path, "aoi_crs": aoi_crs},
         )
         return
 
@@ -134,12 +248,55 @@ def run_wizard(
             options = {**options, "dem_stack_path": stack_path}
         else:
             dem_paths = _prompt_list("Enter DEM path(s), comma-separated: ")
+    if not dem_paths and not stack_path:
+        raise ValueError("Wizard requires DEMs or a DEM stack.")
+
+    if not aoi_path:
+        aoi_input = _prompt_optional_str("AOI path (optional)", None)
+        if aoi_input:
+            aoi_path = aoi_input
+    if aoi_path and not aoi_crs:
+        aoi_crs = _prompt_optional_str(
+            "AOI CRS (blank assumes EPSG:4326, preferred)",
+            None,
+        )
+
+    dem_path_list = [Path(path) for path in (dem_paths or [])]
+    if not dem_path_list and stack_path:
+        stack = load_dem_stack(Path(stack_path))
+        dem_path_list = [layer.path for layer in stack.layers]
+
+    if dem_path_list:
+        infos = _inspect_dem_paths(dem_path_list)
+        _print_dem_summary(infos)
+        warnings: list[str] = []
+        for info in infos:
+            warnings.extend(_dem_warnings(info))
+        if warnings:
+            print("Warnings:")
+            for warning in warnings:
+                print(f"  {warning}")
+        density_default = _recommend_density(infos) or options.get("density", "medium")
+        if density_default != options.get("density", "medium"):
+            print(f"Recommended density preset: {density_default}")
+    else:
+        density_default = options.get("density", "medium")
+
+    if not tiles and infer_tiles_flag:
+        inference = infer_tiles(
+            dem_path_list,
+            aoi_path=Path(aoi_path) if aoi_path else None,
+            aoi_crs=aoi_crs,
+        )
+        for warning in inference.warnings:
+            print(f"Warning: {warning}")
+        _print_tile_estimates(inference.tiles, inference.coverage)
+        if _prompt_bool("Use inferred tiles", True):
+            tiles = inference.tiles
     if not tiles:
         tiles = _prompt_list("Enter tile name(s), comma-separated: ")
     if not tiles:
         raise ValueError("Wizard requires tiles.")
-    if not dem_paths and not stack_path:
-        raise ValueError("Wizard requires DEMs or a DEM stack.")
 
     output_input = _prompt_optional_str("Output directory", str(output_dir))
     if output_input:
@@ -185,7 +342,7 @@ def run_wizard(
     density = _prompt_choice(
         "Density preset",
         tuple(DENSITY_PRESETS.keys()),
-        options.get("density", "medium"),
+        density_default,
     )
     autoortho = _prompt_bool(
         "Enable AutoOrtho mode (skip downloads)",
@@ -289,6 +446,9 @@ def run_wizard(
         "normalize": not skip_normalize,
         "runner": runner_cmd,
         "dsftool": dsftool_cmd,
+        "aoi": aoi_path,
+        "aoi_crs": aoi_crs,
+        "infer_tiles": infer_tiles_flag,
         "target_crs": target_crs,
         "target_resolution": target_resolution,
         "resampling": resampling,

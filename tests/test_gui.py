@@ -113,7 +113,10 @@ def test_build_form_to_request() -> None:
     values = {
         "dems": "a.tif, b.tif",
         "dem_stack": "",
+        "aoi_path": "area.geojson",
+        "aoi_crs": "EPSG:4326",
         "tiles": "+47+008",
+        "infer_tiles": True,
         "output_dir": "out",
         "quality": "xp12-enhanced",
         "density": "high",
@@ -150,6 +153,9 @@ def test_build_form_to_request() -> None:
     assert options["quality"] == "xp12-enhanced"
     assert options["density"] == "high"
     assert options["autoortho"] is True
+    assert options["aoi"] == "area.geojson"
+    assert options["aoi_crs"] == "EPSG:4326"
+    assert options["infer_tiles"] is True
     assert options["normalize"] is True
     assert options["tile_jobs"] == 4
     assert options["triangle_warn"] == 100

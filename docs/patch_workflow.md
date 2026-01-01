@@ -32,4 +32,5 @@ By default, patched output lands in `build/patches/<plan-stem>/` and includes:
 ## Notes
 - Patch DEMs are reprojected to match the base tile CRS/resolution.
 - AOI masks require a nodata value to carve out the patch area.
+- AOI GeoJSON defaults to EPSG:4326 when CRS metadata is missing.
 - Supply `--output` to write patched tiles elsewhere.
