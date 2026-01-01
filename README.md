@@ -66,17 +66,10 @@ Install/build helpers:
 
 ```bash
 python scripts/install_tools.py --write-config
-python scripts/build_xptools.py --install-deps --write-config
 ```
 
-Source builds are preferred for XPTools; pass `--allow-downloads` or
-`--no-source` to permit zip downloads when needed.
-
-Build requirements for XPTools:
-- Windows: Visual Studio Build Tools 2017+ with MSBuild and the C++ workload.
-  Override detection with `DEM2DSF_MSBUILD_PATH` and `DEM2DSF_VCVARSALL_PATH`.
-- macOS: Xcode (xcodebuild). Install Command Line Tools if missing.
-- Linux: clang, make, and git.
+XPTools (DSFTool/DDSTool) are pulled from the platform zip on the tools page.
+Use `--xptools-url` or `--xptools-archive` to override the download.
 
 ## Usage guide (by purpose)
 

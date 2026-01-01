@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
 import tarfile
@@ -87,6 +88,29 @@ def extract_archive(archive_path: Path, destination: Path) -> list[Path]:
     return sorted(extracted_roots)
 
 
+def is_executable_file(path: Path) -> bool:
+    """Return True if the path looks like a runnable tool binary/script."""
+    if not path.is_file():
+        return False
+    if os.name == "nt":
+        return path.suffix.lower() in {".exe", ".bat", ".cmd"}
+    if os.access(path, os.X_OK):
+        return True
+    try:
+        header = path.read_bytes()[:4]
+    except OSError:
+        return False
+    if header.startswith(b"#!"):
+        return True
+    return header in {
+        b"\x7fELF",
+        b"\xFE\xED\xFA\xCE",
+        b"\xCE\xFA\xED\xFE",
+        b"\xFE\xED\xFA\xCF",
+        b"\xCF\xFA\xED\xFE",
+    }
+
+
 def _find_executable(names: Iterable[str], search_dirs: Iterable[Path]) -> Path | None:
     """Search PATH and directories for an executable."""
     for name in names:
@@ -96,7 +120,7 @@ def _find_executable(names: Iterable[str], search_dirs: Iterable[Path]) -> Path 
     for root in search_dirs:
         for name in names:
             candidate = root / name
-            if candidate.exists():
+            if is_executable_file(candidate):
                 return candidate
     return None
 
@@ -105,7 +129,7 @@ def _find_in_tree(root: Path, names: Iterable[str]) -> Path | None:
     """Search a directory tree for matching file names."""
     for name in names:
         for candidate in root.rglob(name):
-            if candidate.is_file():
+            if is_executable_file(candidate):
                 return candidate
     return None
 

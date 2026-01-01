@@ -21,12 +21,6 @@ from dem2dsf.tools.installer import (
     install_ortho4xp,
     is_url,
 )
-from dem2dsf.tools.xptools_build import (
-    XPTOOLS_COMMIT,
-    XPTOOLS_REPO_URL,
-    XPTOOLS_TAG,
-    build_xptools,
-)
 
 DEFAULT_ORTHO4XP_URL = "https://github.com/oscarpilote/Ortho4XP.git"
 DEFAULT_XPTOOLS_URLS = {
@@ -166,12 +160,6 @@ def _ensure_dsftool(
     url: str | None,
     archive: Path | None,
     install_root: Path,
-    prefer_source: bool,
-    allow_downloads: bool,
-    xptools_tag: str,
-    xptools_commit: str | None,
-    xptools_repo: str,
-    install_deps: bool,
     interactive: bool,
     skip_install: bool,
 ) -> InstallResult:
@@ -181,25 +169,8 @@ def _ensure_dsftool(
         return InstallResult("dsftool", "ok", found, "found")
     if skip_install:
         return InstallResult("dsftool", "missing", None, "not found")
-    if prefer_source:
-        try:
-            built = build_xptools(
-                source_dir=install_root / "xptools-src",
-                install_dir=install_root / "xptools",
-                repo_url=xptools_repo,
-                tag=xptools_tag,
-                commit=xptools_commit,
-                install_deps=install_deps,
-                interactive=interactive,
-            )
-            for tool in built:
-                if tool.name == "dsftool":
-                    return InstallResult("dsftool", "ok", tool.path, "built from source")
-        except Exception as exc:
-            if not allow_downloads:
-                return InstallResult("dsftool", "error", None, str(exc))
     install_dir = install_root / "xptools"
-    if allow_downloads and url:
+    if url:
         try:
             found = install_from_url(
                 url,
@@ -209,7 +180,7 @@ def _ensure_dsftool(
             return InstallResult("dsftool", "ok", found, f"downloaded from {url}")
         except Exception as exc:
             return InstallResult("dsftool", "error", None, str(exc))
-    if allow_downloads and archive:
+    if archive:
         try:
             found = install_from_archive(
                 archive,
@@ -227,12 +198,6 @@ def _ensure_dsftool(
                 url=response,
                 archive=None,
                 install_root=install_root,
-                prefer_source=prefer_source,
-                allow_downloads=allow_downloads,
-                xptools_tag=xptools_tag,
-                xptools_commit=xptools_commit,
-                xptools_repo=xptools_repo,
-                install_deps=install_deps,
                 interactive=False,
                 skip_install=False,
             )
@@ -243,12 +208,6 @@ def _ensure_dsftool(
                 url=None,
                 archive=archive_path,
                 install_root=install_root,
-                prefer_source=prefer_source,
-                allow_downloads=allow_downloads,
-                xptools_tag=xptools_tag,
-                xptools_commit=xptools_commit,
-                xptools_repo=xptools_repo,
-                install_deps=install_deps,
                 interactive=False,
                 skip_install=False,
             )
@@ -307,37 +266,7 @@ def main() -> int:
         default=_default_xptools_url(),
         help="XPTools archive URL (DSFTool).",
     )
-    parser.add_argument(
-        "--xptools-repo",
-        default=XPTOOLS_REPO_URL,
-        help="X-Plane/xptools git repo URL.",
-    )
-    parser.add_argument(
-        "--xptools-tag",
-        default=XPTOOLS_TAG,
-        help="Git tag for DSFTool/DDSTool builds.",
-    )
-    parser.add_argument(
-        "--xptools-commit",
-        default=XPTOOLS_COMMIT,
-        help="Optional pinned commit SHA for the xptools tag (omit to use tag only).",
-    )
     parser.add_argument("--xptools-archive", help="Local XPTools archive path.")
-    parser.add_argument(
-        "--no-source",
-        action="store_true",
-        help="Disable source builds and use downloads only.",
-    )
-    parser.add_argument(
-        "--allow-downloads",
-        action="store_true",
-        help="Allow fallback to zip/archive downloads.",
-    )
-    parser.add_argument(
-        "--install-deps",
-        action="store_true",
-        help="Attempt to install build dependencies for source builds.",
-    )
     parser.add_argument(
         "--non-interactive",
         action="store_true",
@@ -360,29 +289,18 @@ def main() -> int:
 
     tools = {tool.strip().lower() for tool in args.tools.split(",") if tool.strip()}
     interactive = not args.non_interactive
-    prefer_source = not args.no_source
-    allow_downloads = args.allow_downloads or not prefer_source
     archive_path = _resolve_archive(args.xptools_archive or "")
     url_value = args.xptools_url or ""
 
     print(f"Install root: {install_root}")
     print(f"Tools requested: {', '.join(sorted(tools)) or 'none'}")
-    print(
-        "Mode: "
-        f"{'source build' if prefer_source else 'downloads only'}, "
-        f"{'downloads allowed' if allow_downloads else 'downloads disabled'}, "
-        f"{'interactive' if interactive else 'non-interactive'}"
-    )
+    print(f"Mode: downloads only, {'interactive' if interactive else 'non-interactive'}")
     if args.check_only:
         print("Check-only: will not install missing tools.")
-    if args.no_source and args.install_deps:
-        print("Note: --install-deps ignored because --no-source is set.")
     if url_value and not is_url(url_value):
         print(f"Note: --xptools-url ignored (not a URL): {url_value}")
     if args.xptools_archive and not archive_path:
         print(f"Note: --xptools-archive not found: {args.xptools_archive}")
-    if not allow_downloads and (url_value or archive_path):
-        print("Note: XPTools downloads are disabled; URL/archive will be ignored.")
 
     search_dirs = [
         install_root / "ortho4xp",
@@ -423,12 +341,6 @@ def main() -> int:
                 url=_resolve_url(url_value),
                 archive=archive_path,
                 install_root=install_root,
-                prefer_source=prefer_source,
-                allow_downloads=allow_downloads,
-                xptools_tag=args.xptools_tag,
-                xptools_commit=args.xptools_commit,
-                xptools_repo=args.xptools_repo,
-                install_deps=args.install_deps,
                 interactive=interactive,
                 skip_install=args.check_only,
             )

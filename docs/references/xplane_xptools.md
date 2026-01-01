@@ -17,10 +17,6 @@ XPTools includes DSFTool, which is the canonical DSF text round-trip and validat
 - macOS: https://files.x-plane.com/public/xptools/xptools_mac_24-5.zip
 - Linux: https://files.x-plane.com/public/xptools/xptools_lin_24-5.zip
 
-## Source build (preferred)
-- Repo: https://github.com/X-Plane/xptools.git
-- Pinned tag: XPTools_2024_5 (optional commit SHA if you need an exact pin).
-- Clone: `git clone --recurse-submodules --branch XPTools_2024_5 https://github.com/X-Plane/xptools.git`
-- Build (Linux): `conf=release_opt make DSFTool DDSTool`
-- Build (macOS): `xcodebuild -project SceneryTools.xcodeproj -scheme DSFTool -configuration Release`
-- Build (Windows): open `msvc/XPTools.sln` and build `Release|Win32` (retargeting is allowed if prompted).
+## Binaries (used by this project)
+- Download the platform zip and point `scripts/install_tools.py` at it.
+- The zip includes `tools/DSFTool.exe`, `tools/DDSTool.exe`, and `README.dsf2text`.

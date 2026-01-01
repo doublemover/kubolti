@@ -38,7 +38,7 @@ content matches the scope below.
 ### Tooling and distribution
 - Ortho4XP runner packaged as `dem2dsf-ortho4xp` console script.
 - GUI bundles for Windows/macOS/Linux via `scripts/build_gui.py`.
-- XPTools source build support via `scripts/build_xptools.py`.
+- XPTools zip install support via `scripts/install_tools.py`.
 
 ### Notes
 - Ortho4XP config overrides are restored by default; use persist config to keep them.

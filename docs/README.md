@@ -18,4 +18,3 @@ Key docs:
 - `sample_pipelines.md` lists regional build recipes and overlays.
 - `references/file_formats.md`, `references/gotchas.md`, and `references/performance_tuning.md` expand on formats and tuning.
 - `tool_urls.json` captures the latest XPTools URLs. Update with `python scripts/fetch_tool_urls.py --output docs/tool_urls.json` (network access required).
-- `scripts/build_xptools.py` builds DSFTool/DDSTool from the pinned source tag.
