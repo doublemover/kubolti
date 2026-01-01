@@ -6,7 +6,6 @@ This project targets Python 3.13 and the toolchain versions below. Update this l
 - Ortho4XP: 1.40 (XP12 water/raster behavior)
 - XPTools (DSFTool/DDSTool): 24-5 binaries (tools page zip)
 - GDAL: 3.11+ (unified CLI and modern raster tooling)
-- Windows build toolchain: Visual Studio 2017+ (toolset v141, MSBuild)
 
 Notes:
 - External tools are BYO binaries; `scripts/install_tools.py` can fetch XPTools zips.

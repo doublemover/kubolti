@@ -19,7 +19,7 @@ DEM2DSF moves data through multiple formats. Understanding what each file encode
   - `manifest.json`: file list + hashes for published builds.
   - `audit_report.json`: counts, sizes, DSF compression summary.
 - Tool discovery:
-- `tools/tool_paths.json` maps tool names to executable/script paths (dsftool, ortho4xp, 7zip).
+- `tools/tool_paths.json` maps tool names to executable/script paths (dsftool, ddstool, ortho4xp, 7zip).
 - DEM stack config (`dem_stack.json`):
   - `layers`: array of `{path, priority, aoi?, nodata?}`.
 - Patch plan (`patch_plan.json`):

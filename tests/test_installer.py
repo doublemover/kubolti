@@ -187,6 +187,15 @@ def test_find_dsftool_in_dir(tmp_path: Path) -> None:
     assert installer.find_dsftool([tool_dir]) == tool_path
 
 
+def test_find_ddstool_in_tree(tmp_path: Path) -> None:
+    tool_dir = tmp_path / "tools" / "nested"
+    tool_dir.mkdir(parents=True)
+    tool_path = tool_dir / _exe_name("DDSTool")
+    _write_executable(tool_path)
+
+    assert installer.find_ddstool([tmp_path]) == tool_path
+
+
 def test_install_from_archive_finds_executable(tmp_path: Path) -> None:
     exe_name = _exe_name("DSFTool")
     archive = _make_zip(

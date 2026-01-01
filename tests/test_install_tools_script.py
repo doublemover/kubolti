@@ -35,6 +35,11 @@ def test_install_tools_script_writes_config(monkeypatch, tmp_path: Path) -> None
         "_ensure_dsftool",
         lambda *a, **k: ok_result("dsftool"),
     )
+    monkeypatch.setattr(
+        module,
+        "find_ddstool",
+        lambda *_args, **_kwargs: stub_path,
+    )
 
     monkeypatch.setattr(
         sys,

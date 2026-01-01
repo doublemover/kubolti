@@ -136,10 +136,28 @@ def _find_in_tree(root: Path, names: Iterable[str]) -> Path | None:
 
 def find_dsftool(search_dirs: Iterable[Path]) -> Path | None:
     """Locate DSFTool in PATH or search directories."""
-    return _find_executable(
-        ("DSFTool.exe", "DSFTool", "dsftool"),
-        search_dirs,
-    )
+    names = ("DSFTool.exe", "DSFTool", "dsftool")
+    found = _find_executable(names, search_dirs)
+    if found:
+        return found
+    for root in search_dirs:
+        found = _find_in_tree(root, names)
+        if found:
+            return found
+    return None
+
+
+def find_ddstool(search_dirs: Iterable[Path]) -> Path | None:
+    """Locate DDSTool in PATH or search directories."""
+    names = ("DDSTool.exe", "DDSTool", "ddstool")
+    found = _find_executable(names, search_dirs)
+    if found:
+        return found
+    for root in search_dirs:
+        found = _find_in_tree(root, names)
+        if found:
+            return found
+    return None
 
 
 def find_ortho4xp(search_dirs: Iterable[Path]) -> Path | None:

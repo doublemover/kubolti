@@ -15,6 +15,7 @@ from dem2dsf.tools.installer import (
     ensure_sevenzip,
     ensure_tool_config,
     find_dsftool,
+    find_ddstool,
     find_ortho4xp,
     install_from_archive,
     install_from_url,
@@ -303,8 +304,8 @@ def main() -> int:
         print(f"Note: --xptools-archive not found: {args.xptools_archive}")
 
     search_dirs = [
-        install_root / "ortho4xp",
         install_root / "xptools",
+        install_root / "ortho4xp",
         Path.home() / "Ortho4XP",
         Path.home() / "XPTools",
     ]
@@ -335,18 +336,28 @@ def main() -> int:
             tool_paths["ortho4xp"] = results[-1].path
 
     if "dsftool" in tools or "xptools" in tools:
-        results.append(
-            _ensure_dsftool(
-                search_dirs,
-                url=_resolve_url(url_value),
-                archive=archive_path,
-                install_root=install_root,
-                interactive=interactive,
-                skip_install=args.check_only,
-            )
+        dsftool_result = _ensure_dsftool(
+            search_dirs,
+            url=_resolve_url(url_value),
+            archive=archive_path,
+            install_root=install_root,
+            interactive=interactive,
+            skip_install=args.check_only,
         )
-        if results[-1].path:
-            tool_paths["dsftool"] = results[-1].path
+        results.append(dsftool_result)
+        if dsftool_result.path:
+            tool_paths["dsftool"] = dsftool_result.path
+        if "ddstool" in tools or "xptools" in tools or "dsftool" in tools:
+            ddstool_path = find_ddstool(search_dirs)
+            if ddstool_path:
+                results.append(
+                    InstallResult("ddstool", "ok", ddstool_path, "found")
+                )
+                tool_paths["ddstool"] = ddstool_path
+            else:
+                results.append(
+                    InstallResult("ddstool", "missing", None, "not found")
+                )
 
     for result in results:
         path = str(result.path) if result.path else "-"
