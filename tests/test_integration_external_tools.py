@@ -160,6 +160,34 @@ def test_integration_ortho4xp_runner_dry_run(tmp_path: Path) -> None:
     assert str(script_path) in result.stdout
 
 
+def test_integration_ortho4xp_entrypoint_accepts_flags() -> None:
+    repo_root = _repo_root()
+    tool_paths = tool_config.load_tool_paths()
+    search_dirs = _tool_search_dirs(repo_root)
+    script_path, _ = _resolve_tool_path(
+        "ortho4xp",
+        tool_paths=tool_paths,
+        search_dirs=search_dirs,
+        finder=installer.find_ortho4xp,
+    )
+    if not script_path:
+        pytest.skip(f"Ortho4XP not found (source: {ORTHO4XP_SOURCE_URL}).")
+
+    result = subprocess.run(
+        [sys.executable, str(script_path), "--help"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    output = f"{result.stdout}\n{result.stderr}".strip()
+    assert result.returncode == 0, (
+        f"Ortho4XP --help failed (code {result.returncode}).\n{output}"
+    )
+    required_flags = ("--tile", "--batch", "--output")
+    missing = [flag for flag in required_flags if flag not in output]
+    assert not missing, f"Ortho4XP help missing flags: {', '.join(missing)}"
+
+
 def test_integration_dsftool_roundtrip(tmp_path: Path) -> None:
     repo_root = _repo_root()
     tool_paths = tool_config.load_tool_paths()
