@@ -7,7 +7,7 @@ content matches the scope below.
 
 ### Highlights
 - Ortho4XP-first build pipeline with runner orchestration and tile staging.
-- XPTools validation support (DSFTool/DDSTool) plus XP12 raster checks.
+- XPTools validation support (DSFTool) plus XP12 raster checks.
 - Diagnostics bundles (reports, logs, metrics, profiles) for shareable triage.
 - Coverage thresholds/metrics and normalization cache reuse.
 - GUI launcher with persisted preferences and updated runner controls.
@@ -43,3 +43,4 @@ content matches the scope below.
 ### Notes
 - Ortho4XP config overrides are restored by default; use persist config to keep them.
 - Integration tests that require external tools auto-skip when tools are missing.
+- DDSTool ships with XPTools but is not invoked by dem2dsf yet.

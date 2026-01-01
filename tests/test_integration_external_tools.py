@@ -240,10 +240,10 @@ def test_integration_dsftool_roundtrip(tmp_path: Path) -> None:
 
     dsf_path = _resolve_global_dsf()
     if dsf_path:
-        roundtrip_dsf(dsftool, dsf_path, tmp_path)
+        roundtrip_dsf([str(dsftool)], dsf_path, tmp_path)
         assert (tmp_path / f"{dsf_path.stem}.txt").exists()
     else:
-        result = run_dsftool(dsftool, ["--help"])
+        result = run_dsftool([str(dsftool)], ["--help"])
         assert result.returncode == 0, (
             f"DSFTool --help failed (code {result.returncode}).\n"
             f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
@@ -270,7 +270,9 @@ def test_integration_xp12_enrichment(tmp_path: Path) -> None:
     target_dsf = tmp_path / global_dsf.name
     shutil.copy(global_dsf, target_dsf)
 
-    result = enrich_dsf_rasters(dsftool, target_dsf, global_dsf, tmp_path / "xp12")
+    result = enrich_dsf_rasters(
+        [str(dsftool)], target_dsf, global_dsf, tmp_path / "xp12"
+    )
     assert result.status in {"enriched", "no-op"}
 
 

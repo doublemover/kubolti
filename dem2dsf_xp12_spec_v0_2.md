@@ -290,6 +290,14 @@ AutoOrtho is a texture streaming layer that expects Ortho4XP-style texture namin
 
 ---
 
+## 12. Tool command semantics
+
+- Tool invocation flags (`--runner`, `--dsftool`) are **command lists**, not single-path strings.
+- Preserve the full token list end-to-end, including wrapper prefixes (Wine, env, conda, etc.).
+- Document quoting expectations for Windows vs POSIX shells.
+
+---
+
 ## 13. Python dependencies (implementation guidance)
 
 ### 13.1 Must-have

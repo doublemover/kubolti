@@ -48,7 +48,7 @@ def test_inventory_dsf_rasters(tmp_path) -> None:
     dsf_path = tmp_path / "tile.dsf"
     dsf_path.write_text("dsf", encoding="utf-8")
 
-    summary = inventory_dsf_rasters(tool, dsf_path, tmp_path / "work")
+    summary = inventory_dsf_rasters([str(tool)], dsf_path, tmp_path / "work")
     assert summary.soundscape_present is True
     assert summary.season_raster_count == 1
 
@@ -88,7 +88,9 @@ def test_enrich_dsf_rasters(tmp_path) -> None:
     target_dsf.write_text("dsf", encoding="utf-8")
     global_dsf.write_text("dsf", encoding="utf-8")
 
-    result = enrich_dsf_rasters(tool, target_dsf, global_dsf, tmp_path / "work")
+    result = enrich_dsf_rasters(
+        [str(tool)], target_dsf, global_dsf, tmp_path / "work"
+    )
     assert result.status == "enriched"
     enriched_text = (tmp_path / "work" / "target.enriched.txt").read_text(encoding="utf-8")
     assert "soundscape" in enriched_text
@@ -125,7 +127,9 @@ def test_enrich_dsf_rasters_copies_raw_sidecars(tmp_path) -> None:
     target_dsf.write_text("dsf", encoding="utf-8")
     global_dsf.write_text("dsf", encoding="utf-8")
 
-    result = enrich_dsf_rasters(tool, target_dsf, global_dsf, tmp_path / "work")
+    result = enrich_dsf_rasters(
+        [str(tool)], target_dsf, global_dsf, tmp_path / "work"
+    )
     assert result.status == "enriched"
     assert (tmp_path / "work" / "target.enriched.txt.soundscape.raw").exists()
 
@@ -164,7 +168,9 @@ def test_enrich_dsf_rasters_reindexes_conflicts(tmp_path) -> None:
     target_dsf.write_text("dsf", encoding="utf-8")
     global_dsf.write_text("dsf", encoding="utf-8")
 
-    result = enrich_dsf_rasters(tool, target_dsf, global_dsf, tmp_path / "work")
+    result = enrich_dsf_rasters(
+        [str(tool)], target_dsf, global_dsf, tmp_path / "work"
+    )
     assert result.status == "enriched"
     enriched_text = (tmp_path / "work" / "target.enriched.txt").read_text(encoding="utf-8")
     assert 'RASTER_DEF 2 "soundscape"' in enriched_text

@@ -76,6 +76,20 @@ def test_stage_custom_dem(tmp_path: Path) -> None:
     assert dest.read_text(encoding="utf-8") == "dem"
 
 
+def test_stage_custom_dem_removes_stale_suffixes(tmp_path: Path) -> None:
+    dem_tif = tmp_path / "tile.tif"
+    dem_hgt = tmp_path / "tile.hgt"
+    dem_tif.write_text("tif", encoding="utf-8")
+    dem_hgt.write_text("hgt", encoding="utf-8")
+
+    stage_custom_dem(tmp_path, "+47+008", dem_tif)
+    second = stage_custom_dem(tmp_path, "+47+008", dem_hgt)
+
+    candidates = sorted(path.name for path in second.parent.glob("N47E008.*"))
+    assert candidates == [second.name]
+    assert second.read_text(encoding="utf-8") == "hgt"
+
+
 def test_copy_tile_outputs(tmp_path: Path) -> None:
     tile_dir = tmp_path / "zOrtho4XP_+47+008"
     terrain = tile_dir / "terrain"
