@@ -92,7 +92,7 @@ def test_cli_patch_dry_run(tmp_path) -> None:
         nodata=-9999,
     )
     build_plan = {
-        "schema_version": "1.1",
+        "schema_version": "1.2",
         "backend": {"name": "ortho4xp"},
         "inputs": {"dems": ["base.tif"]},
         "options": {"tile_dem_paths": {"+47+008": str(base_tile)}},

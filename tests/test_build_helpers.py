@@ -19,7 +19,7 @@ class DummyBackend:
         self._spec = BackendSpec(
             name="dummy",
             version="0",
-            artifact_schema_version="1.1",
+            artifact_schema_version="1.2",
             tile_dem_crs="EPSG:4326",
             supports_xp12_rasters=True,
             supports_autoortho=True,

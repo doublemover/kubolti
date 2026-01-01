@@ -324,3 +324,50 @@ def test_run_build_dsf_validation(tmp_path) -> None:
     metrics = tile_report.get("metrics", {})
     assert metrics["dsf_validation"]["roundtrip"] == "ok"
     assert metrics["dsf_validation"]["bounds"]["mismatches"] == []
+
+
+def test_run_build_provenance_basic(tmp_path) -> None:
+    dem_path = tmp_path / "dem.tif"
+    dem_path.write_text("dem", encoding="utf-8")
+    output_dir = tmp_path / "out"
+
+    result = run_build(
+        dem_paths=[dem_path],
+        tiles=["+47+008"],
+        backend_name="ortho4xp",
+        output_dir=output_dir,
+        options={
+            "dry_run": True,
+            "quality": "compat",
+            "density": "medium",
+            "provenance_level": "basic",
+        },
+    )
+
+    provenance = result.build_plan["provenance"]
+    dem_entry = provenance["inputs"]["dems"][0]
+    assert provenance["level"] == "basic"
+    assert "size" in dem_entry
+    assert "sha256" not in dem_entry
+
+
+def test_run_build_stable_metadata_omits_created_at(tmp_path) -> None:
+    dem_path = tmp_path / "dem.tif"
+    dem_path.write_text("dem", encoding="utf-8")
+    output_dir = tmp_path / "out"
+
+    result = run_build(
+        dem_paths=[dem_path],
+        tiles=["+47+008"],
+        backend_name="ortho4xp",
+        output_dir=output_dir,
+        options={
+            "dry_run": True,
+            "quality": "compat",
+            "density": "medium",
+            "stable_metadata": True,
+        },
+    )
+
+    assert "created_at" not in result.build_plan
+    assert "created_at" not in result.build_report

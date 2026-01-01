@@ -292,7 +292,17 @@ AutoOrtho is a texture streaming layer that expects Ortho4XP-style texture namin
 
 ---
 
-## 12. Tool command semantics
+## 12. Provenance and determinism
+
+We distinguish deterministic artifacts (mesh outputs) from deterministic metadata (timestamps, performance timings, file mtimes).
+
+- `--provenance-level {basic,strict}` controls input fingerprints: basic records size+mtime, strict adds SHA-256 and toolchain version probes.
+- `--stable-metadata` omits `created_at` in build_plan/build_report; other fields may still vary.
+- Build plan/report include a `provenance` block for inputs, toolchain, environment versions, coverage summary, and pinned-version drift.
+
+---
+
+## 13. Tool command semantics
 
 - Tool invocation flags (`--runner`, `--dsftool`) are **command lists**, not single-path strings.
 - Preserve the full token list end-to-end, including wrapper prefixes (Wine, env, conda, etc.).
@@ -317,7 +327,7 @@ dem2dsf build --dem dem.tif --tile +47+008 `
 
 ---
 
-## 13. Python dependencies (implementation guidance)
+## 14. Python dependencies (implementation guidance)
 
 ### 13.1 Must-have
 - `rasterio` + GDAL backend
@@ -334,7 +344,7 @@ dem2dsf build --dem dem.tif --tile +47+008 `
 
 ---
 
-## 14. Milestones (high level)
+## 15. Milestones (high level)
 
 - **M0**: reference harvest + backend contracts  
 - **M1**: DEM normalization (mosaic/reproject/resample/tile/fill) + Ortho4XP backend build  
@@ -345,7 +355,7 @@ dem2dsf build --dem dem.tif --tile +47+008 `
 
 ---
 
-## 15. References (harvest targets)
+## 16. References (harvest targets)
 
 > URLs are provided in code formatting so they can be copied directly.
 

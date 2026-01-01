@@ -32,6 +32,7 @@ from dem2dsf.dsf import (
     parse_properties_from_file,
 )
 from dem2dsf.perf import PerfTracker, resolve_metrics_path
+from dem2dsf.provenance import PROVENANCE_LEVELS, build_provenance
 from dem2dsf.reporting import build_plan, build_report
 from dem2dsf.tools.dsftool import roundtrip_dsf
 from dem2dsf.triangles import estimate_triangles_from_raster
@@ -272,6 +273,9 @@ def _validate_build_inputs(
             raise ValueError("min_coverage must be between 0 and 1.")
     elif options.get("coverage_hard_fail"):
         raise ValueError("coverage_hard_fail requires min_coverage.")
+    provenance_level = options.get("provenance_level", "basic")
+    if provenance_level not in PROVENANCE_LEVELS:
+        raise ValueError("provenance_level must be basic or strict.")
 
 
 def _apply_triangle_guardrails(report: dict[str, Any], options: Mapping[str, Any]) -> None:
@@ -862,6 +866,21 @@ def run_build(
         report_artifacts["diagnostics_bundle"] = str(bundle_path)
         report_with_bundle = {**result.build_report, "artifacts": report_artifacts}
         result = BuildResult(build_plan=result.build_plan, build_report=report_with_bundle)
+    provenance, provenance_warnings = build_provenance(
+        options=options,
+        dem_paths=dem_paths,
+        coverage_metrics=coverage_metrics,
+    )
+    plan = dict(result.build_plan)
+    report = dict(result.build_report)
+    plan["provenance"] = provenance
+    report["provenance"] = provenance
+    if provenance_warnings:
+        report["warnings"] = list(report.get("warnings", [])) + provenance_warnings
+    if options.get("stable_metadata"):
+        plan.pop("created_at", None)
+        report.pop("created_at", None)
+    result = BuildResult(build_plan=plan, build_report=report)
     validate_build_plan(result.build_plan)
     validate_build_report(result.build_report)
     write_json(output_dir / "build_plan.json", result.build_plan)

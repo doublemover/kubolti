@@ -119,22 +119,11 @@ Status legend: planned | in-progress | done. Update the status tags as work land
   - Surface early warnings for extreme resolutions, missing CRS, suspect elevation ranges, NaN/outlier prevalence, or unit mismatches
   - Offer recommended defaults based on inspection
 
-## Phase 14 — Provenance, Reproducibility, and Determinism (planned)
-- Extend build_plan/build_report to include reproducibility metadata:
-  - Input file hashes (SHA-256) (optional/strict mode)
-  - Tool versions and resolved paths (Ortho4XP, DSFTool, 7z, Python runtime)
-  - Ortho4XP script path + derived version + git commit (when available)
-  - Python deps versions (rasterio/GDAL/pyproj)
-  - Record vertical assumptions/units and coverage metrics in plan/report metadata
-- Add `--provenance-level {basic,strict}`:
-  - basic: size+mtime fingerprints
-  - strict: content hashes + full toolchain version capture
-- Define and document determinism policy:
-  - Whether timestamps belong in plan/report
-  - Optional `--stable-metadata` mode that omits volatile fields or uses a stable build id
-- Update provenance/determinism specs with deterministic-artifacts vs deterministic-metadata levels and timestamp policy guidance.
-- Align build report expectations with `docs/pinned_versions.md` (version drift visibility).
-- Update JSON schemas/contracts and add migration notes.
+## Phase 14 — Provenance, Reproducibility, and Determinism (done)
+- Extend build_plan/build_report with provenance metadata (input fingerprints/hashes, toolchain paths/versions, Ortho4XP script + git commit when available, python deps, vertical-unit assumption, coverage summary).
+- Add `--provenance-level {basic,strict}` and `--stable-metadata` (omit created_at).
+- Add pinned versions config with override support and report version drift warnings.
+- Update schemas/contracts, specs, and migration notes for optional timestamps and provenance blocks.
 
 ## Phase 15 — Validation & Quality Modes (planned)
 - DSF validation levels:

@@ -6,6 +6,7 @@ Key docs:
 - `../COMPLETE_PLAN.md` is the sole source of truth for roadmap and status.
 - `backend_contract.md` defines the backend interface and artifact expectations.
 - `pinned_versions.md` tracks toolchain versions targeted by the project.
+- `migrations.md` summarizes schema and workflow migrations.
 - `dem_stack.md` documents multi-resolution DEM stack inputs.
 - `patch_workflow.md` describes patch plans and patch CLI usage.
 - `overlay_plugins.md` covers drape overlays and plugin generators.

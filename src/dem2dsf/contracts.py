@@ -8,7 +8,7 @@ from typing import Any, Mapping
 
 import jsonschema
 
-SCHEMA_VERSION = "1.1"
+SCHEMA_VERSION = "1.2"
 
 
 def _load_schema(name: str) -> dict[str, Any]:

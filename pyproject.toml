@@ -34,7 +34,7 @@ package-dir = {"" = "src"}
 where = ["src"]
 
 [tool.setuptools.package-data]
-dem2dsf = ["schemas/*.json"]
+dem2dsf = ["schemas/*.json", "resources/*.json"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

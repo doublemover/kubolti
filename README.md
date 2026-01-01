@@ -83,6 +83,8 @@ dem2dsf build --dem dem.tif --tile +47+008 --output build
 
 Build outputs include `build/build_plan.json` and `build/build_report.json`.
 Use `--tile-jobs 4` to parallelize per-tile normalization work.
+Add `--provenance-level strict` to capture input hashes and toolchain versions, or
+`--stable-metadata` to omit `created_at` in plan/report outputs.
 
 ### AutoOrtho mode
 

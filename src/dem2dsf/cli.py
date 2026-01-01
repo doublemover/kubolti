@@ -80,6 +80,9 @@ class BuildOptions:
     dem_stack_path: str | None
     profile: bool
     metrics_json: str | None
+    provenance_level: str
+    stable_metadata: bool
+    pinned_versions_path: str | None
 
     def as_dict(self) -> dict[str, object]:
         return {
@@ -117,6 +120,9 @@ class BuildOptions:
             "dem_stack_path": self.dem_stack_path,
             "profile": self.profile,
             "metrics_json": self.metrics_json,
+            "provenance_level": self.provenance_level,
+            "stable_metadata": self.stable_metadata,
+            "pinned_versions_path": self.pinned_versions_path,
         }
 
 
@@ -166,6 +172,9 @@ def _build_options_from_args(
         dem_stack_path=getattr(args, "dem_stack", None),
         profile=bool(getattr(args, "profile", False)),
         metrics_json=getattr(args, "metrics_json", None),
+        provenance_level=getattr(args, "provenance_level", "basic"),
+        stable_metadata=bool(getattr(args, "stable_metadata", False)),
+        pinned_versions_path=getattr(args, "pinned_versions", None),
     )
 
 
@@ -355,6 +364,21 @@ def _add_build_parser(subparsers: argparse._SubParsersAction) -> None:
         action="store_true",
         help="Bundle diagnostics artifacts after the build completes.",
     )
+    build.add_argument(
+        "--provenance-level",
+        choices=("basic", "strict"),
+        default="basic",
+        help="Provenance detail level (default: basic).",
+    )
+    build.add_argument(
+        "--stable-metadata",
+        action="store_true",
+        help="Omit volatile metadata fields like created_at from plan/report.",
+    )
+    build.add_argument(
+        "--pinned-versions",
+        help="Override pinned versions config (defaults to package or DEM2DSF_PINNED_VERSIONS).",
+    )
 
 
 def _add_wizard_parser(subparsers: argparse._SubParsersAction) -> None:
@@ -543,6 +567,21 @@ def _add_wizard_parser(subparsers: argparse._SubParsersAction) -> None:
         "--bundle-diagnostics",
         action="store_true",
         help="Bundle diagnostics artifacts after the build completes.",
+    )
+    wizard.add_argument(
+        "--provenance-level",
+        choices=("basic", "strict"),
+        default="basic",
+        help="Provenance detail level (default: basic).",
+    )
+    wizard.add_argument(
+        "--stable-metadata",
+        action="store_true",
+        help="Omit volatile metadata fields like created_at from plan/report.",
+    )
+    wizard.add_argument(
+        "--pinned-versions",
+        help="Override pinned versions config (defaults to package or DEM2DSF_PINNED_VERSIONS).",
     )
 
 
@@ -740,6 +779,21 @@ def _add_autoortho_parser(subparsers: argparse._SubParsersAction) -> None:
         "--bundle-diagnostics",
         action="store_true",
         help="Bundle diagnostics artifacts after the build completes.",
+    )
+    auto.add_argument(
+        "--provenance-level",
+        choices=("basic", "strict"),
+        default="basic",
+        help="Provenance detail level (default: basic).",
+    )
+    auto.add_argument(
+        "--stable-metadata",
+        action="store_true",
+        help="Omit volatile metadata fields like created_at from plan/report.",
+    )
+    auto.add_argument(
+        "--pinned-versions",
+        help="Override pinned versions config (defaults to package or DEM2DSF_PINNED_VERSIONS).",
     )
     auto.add_argument(
         "--dsftool-timeout",
