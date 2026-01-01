@@ -255,8 +255,7 @@ def test_ortho4xp_backend_multi_dems_with_tile_paths_no_warning(tmp_path) -> Non
     result = backend.build(request)
 
     assert not any(
-        "Multiple DEMs provided" in warning
-        for warning in result.build_report["warnings"]
+        "Multiple DEMs provided" in warning for warning in result.build_report["warnings"]
     )
 
 

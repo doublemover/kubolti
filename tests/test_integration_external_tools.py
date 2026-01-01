@@ -270,9 +270,7 @@ def test_integration_xp12_enrichment(tmp_path: Path) -> None:
     target_dsf = tmp_path / global_dsf.name
     shutil.copy(global_dsf, target_dsf)
 
-    result = enrich_dsf_rasters(
-        [str(dsftool)], target_dsf, global_dsf, tmp_path / "xp12"
-    )
+    result = enrich_dsf_rasters([str(dsftool)], target_dsf, global_dsf, tmp_path / "xp12")
     assert result.status in {"enriched", "no-op"}
 
 

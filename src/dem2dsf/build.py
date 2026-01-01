@@ -263,13 +263,9 @@ def _validate_build_inputs(
         )
         if not tile_dem_complete:
             if options.get("dem_stack_path"):
-                raise ValueError(
-                    "Skipping normalization is not supported with DEM stacks."
-                )
+                raise ValueError("Skipping normalization is not supported with DEM stacks.")
             if len(dem_list) != 1:
-                raise ValueError(
-                    "Skipping normalization requires exactly one DEM path."
-                )
+                raise ValueError("Skipping normalization requires exactly one DEM path.")
     coverage_min = options.get("coverage_min")
     if coverage_min is not None:
         if not 0.0 <= float(coverage_min) <= 1.0:

@@ -406,9 +406,7 @@ def test_apply_dsf_validation_missing_dsf(tmp_path: Path) -> None:
     assert report["tiles"][0]["status"] == "warning"
 
 
-def test_apply_dsf_validation_preserves_dsftool_command(
-    monkeypatch, tmp_path: Path
-) -> None:
+def test_apply_dsf_validation_preserves_dsftool_command(monkeypatch, tmp_path: Path) -> None:
     output_dir = tmp_path / "out"
     dsf_path = xplane_dsf_path(output_dir, "+47+008")
     dsf_path.parent.mkdir(parents=True, exist_ok=True)
@@ -430,15 +428,11 @@ def test_apply_dsf_validation_preserves_dsftool_command(
             "sim/north": "48",
         },
     )
-    monkeypatch.setattr(
-        build, "parse_bounds", lambda *_: build.expected_bounds_for_tile("+47+008")
-    )
+    monkeypatch.setattr(build, "parse_bounds", lambda *_: build.expected_bounds_for_tile("+47+008"))
     monkeypatch.setattr(build, "compare_bounds", lambda *_: [])
 
     report = {"tiles": [{"tile": "+47+008", "status": "ok"}]}
-    build._apply_dsf_validation(
-        report, {"dsftool": ["wine", "DSFTool.exe"]}, output_dir
-    )
+    build._apply_dsf_validation(report, {"dsftool": ["wine", "DSFTool.exe"]}, output_dir)
 
     assert captured["cmd"] == ["wine", "DSFTool.exe"]
 
