@@ -96,29 +96,15 @@ Status legend: planned | in-progress | done. Update the status tags as work land
 - Wizard flow, XP12 raster checks/enrichment, triangle guardrails.
 - AutoOrtho compatibility/presets, publishing/packaging.
 
-## Phase 12 — v0.1.1 Compatibility & Correctness Hotfix (planned)
-- Fix DSFTool command handling so `--dsftool` remains a full command list end-to-end (supports wrappers like Wine).
-  - Update `tools/dsftool.py` to accept command prefixes, not just a single `Path`.
-  - Align build-time DSF validation + XP12 raster inventory/enrichment with that representation.
-  - Preserve `.py` DSFTool script support, applying wrapper logic to the final executable token.
-- Define tool command semantics in the spec (command lists for `--dsftool`/`--runner`, plus Windows vs POSIX quoting rules).
-- Fix patch rebuild for multi-DEM base builds and DEM stacks.
-  - Option A: allow `normalize=false` when `tile_dem_paths` is provided and covers all target tiles.
-  - Option B: call `run_build(dem_paths=[])` in patch rebuild when `tile_dem_paths` is present.
-  - Option C: keep `normalize=true` but treat normalization as a no-op when `tile_dem_paths` already provide outputs.
-- Apply axis-order safety consistently for all CRS transforms (always_xy).
-  - Replace `rasterio.warp.transform_bounds` usage in tiling with the repo’s always_xy transformer helper.
-  - If needed, wrap transform_bounds calls in `rasterio.Env(OGR_CT_FORCE_TRADITIONAL_GIS_ORDER="YES")`, but prefer explicit always_xy transforms.
-  - Update specs to require always_xy (or equivalent) and include a projected-CRS regression test guideline.
-- Fix misleading multi-DEM warning in the Ortho4XP backend when `tile_dem_paths` is present.
-  - Gate the warning on `tile_dem_paths` or adjust wording to reflect per-tile normalized DEMs.
-- Fix Ortho4XP runner `_runner_env` PYTHONPATH injection path (dev/source execution correctness).
-  - Adjust parent traversal to point at the repo `src/` root (likely `parents[2]` or `parents[3]`).
-- Make Ortho4XP DEM staging deterministic when the staged DEM suffix changes.
-  - Remove stale `NxxEyyy.*` files before staging the new DEM.
-  - Record the staged DEM path in build reports for transparency.
-- Resolve DDSTool “support” claim mismatch:
-  - Either implement a minimal DDSTool validation hook, remove/clarify DDSTool language in docs/release notes, or mark it as “tooling included, not yet integrated.”
+## Phase 12 — v0.1.1 Compatibility & Correctness Hotfix (done)
+- Preserve DSFTool command lists end-to-end, including wrappers and `.py` script handling.
+- Document tool command list semantics and quoting rules for Windows vs POSIX in the spec.
+- Allow patch rebuilds to skip normalization when `tile_dem_paths` covers all target tiles.
+- Enforce always_xy axis order for CRS transforms in tiling; include projected-CRS regression guidance.
+- Suppress the misleading Ortho4XP multi-DEM warning when per-tile DEMs are supplied.
+- Fix Ortho4XP runner PYTHONPATH injection to point at the repo `src/` root.
+- Make Ortho4XP DEM staging deterministic by removing stale suffix variants and recording the staged path.
+- Clarify DDSTool documentation to note it ships with XPTools but is not yet invoked.
 
 ## Phase 13 — Spec Alignment: Tile Inference + AOI + Wizard Inspect (planned)
 - Implement tile inference from DEM bounds (and from AOI polygon bounds when provided).
