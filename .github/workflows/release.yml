@@ -92,6 +92,14 @@ jobs:
     permissions:
       contents: write
     steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
       - name: Download dist artifacts
         uses: actions/download-artifact@v4
         with:
@@ -104,9 +112,65 @@ jobs:
           pattern: gui-*
           path: release/gui
 
-      - name: Publish GitHub release
-        uses: softprops/action-gh-release@v2
-        with:
-          files: |
-            release/dist/*
-            release/gui/**
+      - name: Package GUI artifacts
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import zipfile
+
+          root = Path("release/gui")
+          for artifact_dir in root.iterdir():
+            if not artifact_dir.is_dir():
+              continue
+            archive = root / f"{artifact_dir.name}.zip"
+            with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED) as zf:
+              for path in artifact_dir.rglob("*"):
+                if path.is_file():
+                  zf.write(path, path.relative_to(artifact_dir))
+          PY
+
+      - name: Upload release assets (skip existing)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import pathlib
+          import subprocess
+          import sys
+
+          tag = os.environ.get("GITHUB_REF_NAME")
+          if not tag:
+            print("GITHUB_REF_NAME is not set.", file=sys.stderr)
+            sys.exit(1)
+
+          def run(cmd, check=True):
+            return subprocess.run(cmd, check=check, text=True, capture_output=True)
+
+          view = run(["gh", "release", "view", tag, "--json", "assets"], check=False)
+          if view.returncode != 0:
+            notes_file = pathlib.Path("docs/release_notes.md")
+            create_cmd = ["gh", "release", "create", tag, "--title", tag]
+            if notes_file.exists():
+              create_cmd += ["--notes-file", str(notes_file)]
+            else:
+              create_cmd.append("--generate-notes")
+            run(create_cmd)
+            view = run(["gh", "release", "view", tag, "--json", "assets"])
+
+          assets = json.loads(view.stdout).get("assets", [])
+          existing = {asset["name"] for asset in assets}
+
+          files = []
+          files.extend(sorted(pathlib.Path("release/dist").glob("*")))
+          files.extend(sorted(pathlib.Path("release/gui").glob("*.zip")))
+
+          to_upload = [path for path in files if path.name not in existing]
+          if not to_upload:
+            print("No new assets to upload.")
+            sys.exit(0)
+
+          print("Uploading:", ", ".join(path.name for path in to_upload))
+          run(["gh", "release", "upload", tag, *[str(path) for path in to_upload]])
+          PY
