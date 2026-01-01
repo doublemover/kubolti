@@ -14,7 +14,7 @@ python -m dem2dsf gui
 - Ortho4XP/DSFTool fields are optional if `tools/tool_paths.json` is
   present (or `DEM2DSF_TOOL_PATHS` is set).
 - Ortho4XP python points at the interpreter used by Ortho4XP (optional).
-- Ortho4XP batch mode toggles `--batch` on the runner for headless runs.
+- Ortho4XP batch mode toggles `--batch` on the runner for headless runs (forwarded only when the upstream script supports flags).
 - Runner override accepts a custom command when you need a non-default launcher.
 - Runner timeout/retry/stream toggles control reliability and log streaming.
 - Persist Ortho4XP.cfg keeps config overrides after the run (default restores).

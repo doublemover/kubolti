@@ -18,7 +18,7 @@ Large mosaics and high-resolution tiles are expensive. These tips help keep buil
 - `CPL_TMPDIR`: put temp files on a fast disk.
 
 ## Backend-specific tips
-- Ortho4XP: run with `--batch` in the runner for headless mode.
+- Ortho4XP: run with `--batch` in the runner for headless mode (ignored if the upstream script does not support flags).
 
 ## Gotchas
 - Over-aggressive resolution can hit triangle caps and slow validation steps.

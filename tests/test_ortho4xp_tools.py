@@ -187,15 +187,31 @@ def test_restore_config_removes_new_file(tmp_path: Path) -> None:
 
 def test_build_command_variants(tmp_path: Path) -> None:
     script = tmp_path / "Ortho4XP_v140.py"
-    script.write_text("pass", encoding="utf-8")
+    script.write_text("--tile --output", encoding="utf-8")
     output_dir = tmp_path / "out"
 
     cmd = build_command(script, "+47+008", output_dir, extra_args=["--foo"], python_exe="py")
     assert cmd[:3] == ["py", str(script), "--foo"]
+    assert "--tile" in cmd
     assert "--output" in cmd
 
     cmd = build_command(script, "+47+008", output_dir, include_output=False)
     assert "--output" not in cmd
+
+    legacy_script = tmp_path / "Ortho4XP.py"
+    legacy_script.write_text("pass", encoding="utf-8")
+    cmd = build_command(
+        legacy_script,
+        "+47+008",
+        output_dir,
+        extra_args=["--batch", "BI", "16"],
+        python_exe="py",
+    )
+    assert cmd[:3] == ["py", str(legacy_script), "47"]
+    assert "8" in cmd
+    assert "--tile" not in cmd
+    assert "--batch" not in cmd
+    assert "BI" in cmd
 
 
 def test_default_scenery_paths() -> None:

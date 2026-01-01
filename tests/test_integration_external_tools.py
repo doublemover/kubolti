@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import shlex
 import shutil
 import subprocess
 import sys
@@ -15,6 +16,7 @@ from dem2dsf.tools import installer
 from dem2dsf.tools.dsftool import roundtrip_dsf, run_dsftool
 from dem2dsf.tools.ortho4xp import TARGET_ORTHO4XP_VERSION, ortho4xp_version
 from dem2dsf.xp12 import enrich_dsf_rasters
+from dem2dsf.xplane_paths import parse_tile
 from tests.utils import with_src_env
 
 pytestmark = pytest.mark.integration
@@ -30,8 +32,8 @@ def _repo_root() -> Path:
 def _tool_search_dirs(repo_root: Path) -> list[Path]:
     install_root = repo_root / "tools"
     return [
-        install_root / "ortho4xp",
         install_root / "xptools",
+        install_root / "ortho4xp",
         Path.home() / "Ortho4XP",
         Path.home() / "XPTools",
     ]
@@ -154,11 +156,23 @@ def test_integration_ortho4xp_runner_dry_run(tmp_path: Path) -> None:
         text=True,
         check=False,
     )
+    output = f"{result.stdout}\n{result.stderr}"
     assert result.returncode == 0, f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
-    assert str(script_path) in result.stdout
+    assert str(script_path) in output
+    for line in output.splitlines():
+        if "Dry run command:" in line:
+            cmd_line = line.split("Dry run command:", 1)[1].strip()
+            tokens = shlex.split(cmd_line, posix=False)
+            lat, lon = parse_tile("+47+008")
+            assert "--tile" not in tokens
+            assert str(lat) in tokens
+            assert str(lon) in tokens
+            break
+    else:
+        raise AssertionError("Dry run command not found in output.")
 
 
-def test_integration_ortho4xp_entrypoint_accepts_flags() -> None:
+def test_integration_ortho4xp_entrypoint_uses_supported_args(tmp_path: Path) -> None:
     repo_root = _repo_root()
     tool_paths = tool_config.load_tool_paths()
     search_dirs = _tool_search_dirs(repo_root)
@@ -170,18 +184,45 @@ def test_integration_ortho4xp_entrypoint_accepts_flags() -> None:
     )
     if not script_path:
         pytest.skip(f"Ortho4XP not found (source: {ORTHO4XP_SOURCE_URL}).")
+    runner = repo_root / "scripts" / "ortho4xp_runner.py"
+    if not runner.exists():
+        pytest.skip("scripts/ortho4xp_runner.py not found.")
+    dem_path = tmp_path / "dem.tif"
+    dem_path.write_text("synthetic", encoding="utf-8")
+    output_dir = tmp_path / "build"
 
     result = subprocess.run(
-        [sys.executable, str(script_path), "--help"],
+        [
+            sys.executable,
+            str(runner),
+            "--tile",
+            "+47+008",
+            "--dem",
+            str(dem_path),
+            "--output",
+            str(output_dir),
+            "--ortho-root",
+            str(script_path.parent),
+            "--dry-run",
+            "--batch",
+            "--pass-output",
+        ],
+        env=with_src_env(),
         capture_output=True,
         text=True,
         check=False,
     )
-    output = f"{result.stdout}\n{result.stderr}".strip()
-    assert result.returncode == 0, f"Ortho4XP --help failed (code {result.returncode}).\n{output}"
-    required_flags = ("--tile", "--batch", "--output")
-    missing = [flag for flag in required_flags if flag not in output]
-    assert not missing, f"Ortho4XP help missing flags: {', '.join(missing)}"
+    output = f"{result.stdout}\n{result.stderr}"
+    assert result.returncode == 0, f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
+    for line in output.splitlines():
+        if "Dry run command:" in line:
+            cmd_line = line.split("Dry run command:", 1)[1].strip()
+            tokens = shlex.split(cmd_line, posix=False)
+            assert "--batch" not in tokens
+            assert "--output" not in tokens
+            break
+    else:
+        raise AssertionError("Dry run command not found in output.")
 
 
 def test_integration_dsftool_roundtrip(tmp_path: Path) -> None:
@@ -203,7 +244,10 @@ def test_integration_dsftool_roundtrip(tmp_path: Path) -> None:
         assert (tmp_path / f"{dsf_path.stem}.txt").exists()
     else:
         result = run_dsftool(dsftool, ["--help"])
-        assert result.stdout or result.stderr
+        assert result.returncode == 0, (
+            f"DSFTool --help failed (code {result.returncode}).\n"
+            f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
+        )
 
 
 def test_integration_xp12_enrichment(tmp_path: Path) -> None:

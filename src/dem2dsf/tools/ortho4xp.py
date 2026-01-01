@@ -10,7 +10,12 @@ import warnings
 from pathlib import Path
 from typing import Iterable, Mapping
 
-from dem2dsf.xplane_paths import bucket_for_tile, elevation_data_path, hgt_tile_name
+from dem2dsf.xplane_paths import (
+    bucket_for_tile,
+    elevation_data_path,
+    hgt_tile_name,
+    parse_tile,
+)
 
 
 class Ortho4XPNotFoundError(RuntimeError):
@@ -126,12 +131,27 @@ def build_command(
 ) -> list[str]:
     """Build a command line to run Ortho4XP."""
     cmd = [python_exe or sys.executable, str(script_path)]
+    supports_flags = _script_supports_flag_args(script_path)
+    if supports_flags:
+        if extra_args:
+            cmd.extend(list(extra_args))
+        cmd.extend(["--tile", tile])
+        if include_output:
+            cmd.extend(["--output", str(output_dir)])
+        return cmd
+    lat, lon = parse_tile(tile)
+    cmd.extend([str(lat), str(lon)])
     if extra_args:
-        cmd.extend(list(extra_args))
-    cmd.extend(["--tile", tile])
-    if include_output:
-        cmd.extend(["--output", str(output_dir)])
+        cmd.extend([arg for arg in extra_args if not str(arg).startswith("-")])
     return cmd
+
+
+def _script_supports_flag_args(script_path: Path) -> bool:
+    try:
+        content = script_path.read_text(encoding="utf-8", errors="ignore")
+    except OSError:
+        return False
+    return any(flag in content for flag in ("--tile", "--batch", "--output"))
 
 
 def default_scenery_root(root: Path) -> Path:
