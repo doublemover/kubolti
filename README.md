@@ -1,6 +1,6 @@
 # DEM2DSF (kubolti)
 ![CI](https://github.com/doublemover/kubolti/actions/workflows/ci.yml/badge.svg)
-![coverage](https://img.shields.io/badge/coverage-100%25-brightgreen)
+![coverage](https://img.shields.io/badge/coverage-93%25-brightgreen)
 
 <p align="center">
   <img width="256" height="256" alt="logo" src="https://github.com/user-attachments/assets/d13fa407-6cea-44dc-902f-e4ef51ee69a8" />
