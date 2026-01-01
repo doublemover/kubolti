@@ -254,7 +254,7 @@ def main() -> int:
     )
     parser.add_argument(
         "--tools",
-        default="7zip,ortho4xp,dsftool",
+        default="7zip,ortho4xp,dsftool,ddstool",
         help="Comma-separated tool list to install.",
     )
     parser.add_argument(
