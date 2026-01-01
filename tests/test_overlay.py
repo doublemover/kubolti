@@ -294,9 +294,7 @@ def test_inventory_overlay_assets(tmp_path: Path) -> None:
     dsf_path.write_text("dsf", encoding="utf-8")
     terrain_dir = build_dir / "terrain"
     terrain_dir.mkdir(parents=True)
-    (terrain_dir / "demo.ter").write_text(
-        "\nTEXTURE foo.dds\n", encoding="utf-8"
-    )
+    (terrain_dir / "demo.ter").write_text("\nTEXTURE foo.dds\n", encoding="utf-8")
 
     output_dir = tmp_path / "out"
     artifacts = inventory_overlay_assets(

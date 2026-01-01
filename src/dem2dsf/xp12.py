@@ -185,9 +185,7 @@ def _copy_raw_sidecars(
         return
     missing_tokens = {name.lower() for name in missing_names}
     matched = [
-        path
-        for path in sidecars
-        if any(token in path.name.lower() for token in missing_tokens)
+        path for path in sidecars if any(token in path.name.lower() for token in missing_tokens)
     ]
     candidates = matched or sidecars
     for src in candidates:
@@ -216,9 +214,7 @@ def summarize_rasters(names: Iterable[str]) -> RasterSummary:
         any(token in name.lower() for token in _SOUND_TOKENS) for name in normalized
     )
     season_rasters = [
-        name
-        for name in normalized
-        if any(token in name.lower() for token in _SEASON_TOKENS)
+        name for name in normalized if any(token in name.lower() for token in _SEASON_TOKENS)
     ]
     return RasterSummary(
         raster_names=tuple(normalized),
@@ -372,11 +368,7 @@ def enrich_dsf_rasters(
         ]
         if property_indices:
             insert_at = property_indices[-1] + 1
-    bound_indices = [
-        index
-        for index, line in enumerate(target_lines)
-        if _is_bound_property(line)
-    ]
+    bound_indices = [index for index, line in enumerate(target_lines) if _is_bound_property(line)]
     if bound_indices:
         insert_at = min(insert_at, min(bound_indices))
 

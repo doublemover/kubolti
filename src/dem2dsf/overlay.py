@@ -162,9 +162,7 @@ def copy_overlay_assets(
             copied_tiles.append(tile)
     else:
         shutil.copytree(earth_dir, output_earth, dirs_exist_ok=True)
-        copied_tiles = sorted(
-            {tile_from_dsf_path(path) for path in output_earth.rglob("*.dsf")}
-        )
+        copied_tiles = sorted({tile_from_dsf_path(path) for path in output_earth.rglob("*.dsf")})
 
     dsf_files = _count_files(output_earth, "*.dsf")
     terrain_files = 0
@@ -172,16 +170,12 @@ def copy_overlay_assets(
     if include_terrain:
         terrain_src = build_dir / "terrain"
         if terrain_src.exists():
-            shutil.copytree(
-                terrain_src, output_dir / "terrain", dirs_exist_ok=True
-            )
+            shutil.copytree(terrain_src, output_dir / "terrain", dirs_exist_ok=True)
             terrain_files = _count_files(output_dir / "terrain")
     if include_textures:
         textures_src = build_dir / "textures"
         if textures_src.exists():
-            shutil.copytree(
-                textures_src, output_dir / "textures", dirs_exist_ok=True
-            )
+            shutil.copytree(textures_src, output_dir / "textures", dirs_exist_ok=True)
             texture_files = _count_files(output_dir / "textures")
 
     return {
@@ -249,9 +243,7 @@ def inventory_overlay_assets(
         "texture_refs": sorted(texture_refs),
     }
     inventory_path = output_dir / "overlay_inventory.json"
-    inventory_path.write_text(
-        json.dumps(inventory, indent=2), encoding="utf-8"
-    )
+    inventory_path.write_text(json.dumps(inventory, indent=2), encoding="utf-8")
     return {
         "inventory_path": str(inventory_path),
         "tile_count": len(tile_names),
@@ -333,9 +325,7 @@ class CopyOverlayGenerator:
                 errors=(str(exc),),
             )
         if artifacts["missing_tiles"]:
-            warnings.append(
-                f"Missing tiles: {', '.join(artifacts['missing_tiles'])}"
-            )
+            warnings.append(f"Missing tiles: {', '.join(artifacts['missing_tiles'])}")
         if include_terrain and artifacts["terrain_files"] == 0:
             warnings.append("No terrain files copied.")
         if include_textures and artifacts["texture_files"] == 0:

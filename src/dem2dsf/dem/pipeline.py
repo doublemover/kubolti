@@ -235,9 +235,7 @@ def _apply_fill_strategy(
         band = dataset.read(1)
         nodata_value = nodata if nodata is not None else dataset.nodata
         if strategy == "constant":
-            result = fill_with_constant(
-                band, nodata=nodata_value, fill_value=fill_value
-            )
+            result = fill_with_constant(band, nodata=nodata_value, fill_value=fill_value)
         elif strategy == "interpolate":
             result = fill_with_interpolation(band, nodata=nodata_value)
         elif strategy == "fallback":
@@ -440,9 +438,7 @@ def normalize_for_tiles(
             apply_backend_profile(raw_path, final_path, backend_profile)
 
         if coverage_metrics:
-            total_after, nodata_after, coverage_after = _coverage_stats(
-                final_path, None
-            )
+            total_after, nodata_after, coverage_after = _coverage_stats(final_path, None)
         else:
             total_after = total_pixels
             nodata_after = max(0, nodata_before - filled_pixels)
@@ -578,9 +574,7 @@ def normalize_stack_for_tiles(
         layer_tile_paths: list[Path] = []
         tile_result: TileResult | None = None
         for index, (_, layer_path, layer_nodata, aoi) in enumerate(warped_layers):
-            tile_path = (
-                work_dir / "stack_layers" / f"layer_{index}" / tile / f"{tile}.tif"
-            )
+            tile_path = work_dir / "stack_layers" / f"layer_{index}" / tile / f"{tile}.tif"
             tile_result = write_tile_dem(
                 layer_path,
                 tile,
@@ -664,9 +658,7 @@ def normalize_stack_for_tiles(
             apply_backend_profile(raw_path, final_path, backend_profile)
 
         if coverage_metrics:
-            total_after, nodata_after, coverage_after = _coverage_stats(
-                final_path, None
-            )
+            total_after, nodata_after, coverage_after = _coverage_stats(final_path, None)
         else:
             total_after = total_pixels
             nodata_after = max(0, nodata_before - filled_pixels)

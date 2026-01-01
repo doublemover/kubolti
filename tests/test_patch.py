@@ -25,9 +25,7 @@ def test_load_patch_plan(tmp_path: Path) -> None:
         json.dumps(
             {
                 "schema_version": "1",
-                "patches": [
-                    {"tile": "+47+008", "dem": "patch.tif", "aoi": "aoi.json"}
-                ],
+                "patches": [{"tile": "+47+008", "dem": "patch.tif", "aoi": "aoi.json"}],
             }
         ),
         encoding="utf-8",
@@ -122,9 +120,7 @@ def test_run_patch_dry_run(tmp_path: Path) -> None:
         "inputs": {"dems": ["base.tif"]},
         "options": {"tile_dem_paths": {"+47+008": str(base_tile)}, "resampling": "nearest"},
     }
-    (build_dir / "build_plan.json").write_text(
-        json.dumps(build_plan), encoding="utf-8"
-    )
+    (build_dir / "build_plan.json").write_text(json.dumps(build_plan), encoding="utf-8")
 
     patch_plan = tmp_path / "patch.json"
     patch_dem = tmp_path / "patch_dem.tif"
@@ -274,22 +270,14 @@ def test_prepare_patch_tile_requires_nodata_for_aoi(tmp_path: Path) -> None:
         json.dumps(
             {
                 "type": "Polygon",
-                "coordinates": [
-                    [[8, 47], [9, 47], [9, 48], [8, 48], [8, 47]]
-                ],
+                "coordinates": [[[8, 47], [9, 47], [9, 48], [8, 48], [8, 47]]],
             }
         ),
         encoding="utf-8",
     )
     plan_path = tmp_path / "plan.json"
     plan_path.write_text(
-        json.dumps(
-            {
-                "patches": [
-                    {"tile": "+47+008", "dem": str(patch_dem), "aoi": str(aoi_path)}
-                ]
-            }
-        ),
+        json.dumps({"patches": [{"tile": "+47+008", "dem": str(patch_dem), "aoi": str(aoi_path)}]}),
         encoding="utf-8",
     )
     entry = load_patch_plan(plan_path).entries[0]
@@ -396,9 +384,7 @@ def test_run_patch_applies_overrides(monkeypatch, tmp_path: Path) -> None:
         "inputs": {"dems": ["base.tif"]},
         "options": {"tile_dem_paths": {"+47+008": str(base_tile)}},
     }
-    (build_dir / "build_plan.json").write_text(
-        json.dumps(build_plan), encoding="utf-8"
-    )
+    (build_dir / "build_plan.json").write_text(json.dumps(build_plan), encoding="utf-8")
 
     patch_plan = tmp_path / "patch.json"
     patch_dem = tmp_path / "patch_dem.tif"

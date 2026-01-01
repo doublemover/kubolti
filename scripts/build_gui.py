@@ -68,9 +68,7 @@ def _has_pyinstaller() -> bool:
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     """Parse command-line arguments for GUI packaging."""
     windowed_default = sys.platform.startswith("win") or sys.platform == "darwin"
-    parser = argparse.ArgumentParser(
-        description="Build a standalone GUI bundle with PyInstaller."
-    )
+    parser = argparse.ArgumentParser(description="Build a standalone GUI bundle with PyInstaller.")
     parser.add_argument("--name", default="dem2dsf-gui", help="Bundle name.")
     parser.add_argument(
         "--output-dir",
@@ -116,12 +114,8 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Override the Ortho4XP runner path to bundle.",
     )
     parser.add_argument("--clean", action="store_true", help="Clean PyInstaller cache.")
-    parser.add_argument(
-        "--noconfirm", action="store_true", help="Overwrite existing bundles."
-    )
-    parser.add_argument(
-        "--dry-run", action="store_true", help="Print the PyInstaller command."
-    )
+    parser.add_argument("--noconfirm", action="store_true", help="Overwrite existing bundles.")
+    parser.add_argument("--dry-run", action="store_true", help="Print the PyInstaller command.")
     args = parser.parse_args(argv)
 
     if args.onefile and args.onedir:
@@ -171,9 +165,7 @@ def _build_command(args: argparse.Namespace) -> tuple[list[str], list[str]]:
         if icon_path.exists() and _icon_allowed(icon_path):
             cmd.extend(["--icon", str(icon_path)])
         elif icon_path.exists():
-            warnings.append(
-                f"Icon format not supported on this platform: {icon_path}"
-            )
+            warnings.append(f"Icon format not supported on this platform: {icon_path}")
         else:
             warnings.append(f"Icon file not found: {icon_path}")
     if args.clean:
@@ -181,13 +173,9 @@ def _build_command(args: argparse.Namespace) -> tuple[list[str], list[str]]:
     if args.noconfirm:
         cmd.append("--noconfirm")
     if args.include_runner:
-        runner_path = (
-            Path(args.runner_path) if args.runner_path else _default_runner(root)
-        )
+        runner_path = Path(args.runner_path) if args.runner_path else _default_runner(root)
         if runner_path.exists():
-            cmd.extend(
-                ["--add-data", f"{runner_path}{_data_separator()}scripts"]
-            )
+            cmd.extend(["--add-data", f"{runner_path}{_data_separator()}scripts"])
         else:
             warnings.append(f"Runner script not found: {runner_path}")
     cmd.append(str(entry))

@@ -118,9 +118,7 @@ def test_update_skip_downloads(tmp_path: Path) -> None:
 def test_read_config_values(tmp_path: Path) -> None:
     config = tmp_path / "Ortho4XP.cfg"
     config.write_text(
-        'custom_overlay_src="C:/X-Plane/Global Scenery"\n'
-        "foo=bar # inline\n"
-        "# comment\n",
+        'custom_overlay_src="C:/X-Plane/Global Scenery"\nfoo=bar # inline\n# comment\n',
         encoding="utf-8",
     )
     values = read_config_values(config)
@@ -130,7 +128,7 @@ def test_read_config_values(tmp_path: Path) -> None:
 
 def test_find_tile_cache_entries(tmp_path: Path) -> None:
     roots = ortho_cache_roots(tmp_path)
-    bucket = (tmp_path / "Elevation_data" / "+40+000")
+    bucket = tmp_path / "Elevation_data" / "+40+000"
     bucket.mkdir(parents=True, exist_ok=True)
     elev = bucket / "N47E008.hgt"
     elev.write_text("dem", encoding="utf-8")
@@ -204,8 +202,6 @@ def test_default_scenery_paths() -> None:
     root = Path("XPlane")
     assert default_scenery_root(root).as_posix().endswith("XPlane/Custom Scenery")
     assert tile_scenery_dir(root, "+47+008").as_posix().endswith("XPlane/zOrtho4XP_+47+008")
-
-
 
 
 def test_ortho4xp_version_parsing() -> None:

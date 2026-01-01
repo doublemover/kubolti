@@ -13,9 +13,7 @@ SCHEMA_VERSION = "1.1"
 
 def _load_schema(name: str) -> dict[str, Any]:
     """Load a JSON schema bundled in the package."""
-    with resources.files("dem2dsf.schemas").joinpath(name).open(
-        "r", encoding="utf-8"
-    ) as handle:
+    with resources.files("dem2dsf.schemas").joinpath(name).open("r", encoding="utf-8") as handle:
         return json.load(handle)
 
 

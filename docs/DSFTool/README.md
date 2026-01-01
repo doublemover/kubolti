@@ -1,6 +1,6 @@
 # DSFTool research notes (design, use, enhance)
 
-This zip contains a set of markdown notes focused on **DSFTool** (Laminar Research / X‑Plane), with an emphasis on:
+This folder contains a set of markdown notes focused on **DSFTool** (Laminar Research / X‑Plane), with an emphasis on:
 
 - how DSFTool is intended to be used (toolchain role, limits)
 - how to obtain the official binaries

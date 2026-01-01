@@ -101,9 +101,7 @@ def test_build_gui_icon_unsupported(monkeypatch, tmp_path: Path, capsys) -> None
     monkeypatch.setattr(module, "_has_pyinstaller", lambda: True)
     monkeypatch.setattr(module, "_supports_png_icon", lambda: False)
     monkeypatch.setattr(module.sys, "platform", "win32", raising=False)
-    result = module.main(
-        ["--entry", str(entry), "--dry-run", "--icon", str(icon_path)]
-    )
+    result = module.main(["--entry", str(entry), "--dry-run", "--icon", str(icon_path)])
     assert result == 0
     output = capsys.readouterr().out
     assert "Icon format not supported" in output

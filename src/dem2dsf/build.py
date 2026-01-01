@@ -188,9 +188,7 @@ def _resolution_from_options(
     return (resolution_m, resolution_m)
 
 
-def _apply_coverage_metrics(
-    report: dict[str, Any], coverage_metrics: Mapping[str, Any]
-) -> None:
+def _apply_coverage_metrics(report: dict[str, Any], coverage_metrics: Mapping[str, Any]) -> None:
     """Attach coverage metrics to the per-tile report entries."""
     if not coverage_metrics:
         return
@@ -233,10 +231,7 @@ def _apply_coverage_thresholds(
             continue
         if metrics.coverage_before >= min_coverage:
             continue
-        message = (
-            f"{tile}: coverage_before {metrics.coverage_before:.2%} "
-            f"below {min_coverage:.2%}"
-        )
+        message = f"{tile}: coverage_before {metrics.coverage_before:.2%} below {min_coverage:.2%}"
         _ensure_messages(tile_entry).append(message)
         if hard_fail:
             _mark_error(tile_entry)
@@ -263,9 +258,7 @@ def _validate_build_inputs(
         if options.get("dem_stack_path"):
             raise ValueError("Skipping normalization is not supported with DEM stacks.")
         if len(list(dem_paths)) != 1:
-            raise ValueError(
-                "Skipping normalization requires exactly one DEM path."
-            )
+            raise ValueError("Skipping normalization requires exactly one DEM path.")
     coverage_min = options.get("coverage_min")
     if coverage_min is not None:
         if not 0.0 <= float(coverage_min) <= 1.0:
@@ -340,9 +333,7 @@ def _apply_xp12_checks(
             continue
         dsf_path = xplane_dsf_path(output_dir, tile)
         if not dsf_path.exists():
-            _ensure_messages(tile_entry).append(
-                "DSF output not found; XP12 raster check skipped."
-            )
+            _ensure_messages(tile_entry).append("DSF output not found; XP12 raster check skipped.")
             _mark_warning(tile_entry)
             continue
         if not dsftool_path:
@@ -394,9 +385,7 @@ def _apply_xp12_checks(
         if global_root:
             candidate = find_global_dsf(global_root, tile)
             if candidate:
-                _ensure_messages(tile_entry).append(
-                    f"Global scenery candidate: {candidate}"
-                )
+                _ensure_messages(tile_entry).append(f"Global scenery candidate: {candidate}")
 
 
 def _apply_xp12_enrichment(
@@ -427,9 +416,7 @@ def _apply_xp12_enrichment(
             continue
         dsf_path = xplane_dsf_path(output_dir, tile)
         if not dsf_path.exists():
-            _ensure_messages(tile_entry).append(
-                "DSF output not found; XP12 enrichment skipped."
-            )
+            _ensure_messages(tile_entry).append("DSF output not found; XP12 enrichment skipped.")
             _mark_warning(tile_entry)
             continue
         global_dsf = find_global_dsf(global_root, tile)
@@ -438,9 +425,7 @@ def _apply_xp12_enrichment(
                 "Global scenery DSF not found; XP12 enrichment skipped."
             )
             _mark_warning(tile_entry)
-            report.setdefault("warnings", []).append(
-                f"{tile}: global scenery DSF not found"
-            )
+            report.setdefault("warnings", []).append(f"{tile}: global scenery DSF not found")
             continue
 
         result = enrich_dsf_rasters(
@@ -461,13 +446,9 @@ def _apply_xp12_enrichment(
             "error": result.error,
         }
         if result.status == "failed":
-            _ensure_messages(tile_entry).append(
-                f"XP12 enrichment failed: {result.error}"
-            )
+            _ensure_messages(tile_entry).append(f"XP12 enrichment failed: {result.error}")
             _mark_error(tile_entry)
-            report.setdefault("errors", []).append(
-                f"{tile}: XP12 enrichment failed"
-            )
+            report.setdefault("errors", []).append(f"{tile}: XP12 enrichment failed")
             continue
         if result.status == "no-op":
             _ensure_messages(tile_entry).append(
@@ -475,9 +456,7 @@ def _apply_xp12_enrichment(
             )
             continue
         if result.status == "enriched":
-            _ensure_messages(tile_entry).append(
-                f"XP12 rasters enriched: {', '.join(result.added)}"
-            )
+            _ensure_messages(tile_entry).append(f"XP12 rasters enriched: {', '.join(result.added)}")
             try:
                 summary = inventory_dsf_rasters(
                     dsftool_path,
@@ -494,9 +473,7 @@ def _apply_xp12_enrichment(
             except RuntimeError as exc:
                 _ensure_messages(tile_entry).append(str(exc))
                 _mark_warning(tile_entry)
-                report.setdefault("warnings", []).append(
-                    f"{tile}: xp12 post-check failed"
-                )
+                report.setdefault("warnings", []).append(f"{tile}: xp12 post-check failed")
 
 
 def _apply_autoortho_checks(
@@ -514,13 +491,11 @@ def _apply_autoortho_checks(
         "missing": list(textures.missing),
         "invalid": list(textures.invalid),
         "guidance": (
-            "AutoOrtho expects Ortho4XP texture naming and skip_downloads "
-            "in Ortho4XP config."
+            "AutoOrtho expects Ortho4XP texture naming and skip_downloads in Ortho4XP config."
         ),
     }
     summary = (
-        f"AutoOrtho textures: {len(textures.invalid)} invalid, "
-        f"{len(textures.missing)} missing."
+        f"AutoOrtho textures: {len(textures.invalid)} invalid, {len(textures.missing)} missing."
     )
     for tile_entry in report.get("tiles", []):
         _ensure_messages(tile_entry).append(summary)
@@ -558,9 +533,7 @@ def _apply_dsf_validation(
             continue
         dsf_path = xplane_dsf_path(output_dir, tile)
         if not dsf_path.exists():
-            _ensure_messages(tile_entry).append(
-                "DSF output not found; DSF validation skipped."
-            )
+            _ensure_messages(tile_entry).append("DSF output not found; DSF validation skipped.")
             _mark_warning(tile_entry)
             continue
         work_dir = output_dir / "dsf_validation" / tile
@@ -624,9 +597,7 @@ def _attach_performance(
         return report
     summary = perf.summary()
     report = {**report, "performance": summary}
-    metrics_path = resolve_metrics_path(
-        output_dir, options.get("metrics_json")
-    )
+    metrics_path = resolve_metrics_path(output_dir, options.get("metrics_json"))
     if metrics_path:
         write_json(metrics_path, summary)
     return report
@@ -679,8 +650,7 @@ def run_build(
             report = build_report(
                 backend=backend_spec,
                 tile_statuses=[
-                    {"tile": tile, "status": "skipped", "messages": ["dry run"]}
-                    for tile in tiles
+                    {"tile": tile, "status": "skipped", "messages": ["dry run"]} for tile in tiles
                 ],
                 artifacts={"scenery_dir": str(output_dir)},
                 warnings=["Dry run enabled; no backend invoked."],
@@ -695,16 +665,14 @@ def run_build(
                 fill_strategy = options.get("fill_strategy", "none")
                 fill_value = float(options.get("fill_value", 0.0) or 0.0)
                 fallback_dem_paths = [
-                    Path(path)
-                    for path in options.get("fallback_dem_paths") or []
+                    Path(path) for path in options.get("fallback_dem_paths") or []
                 ]
                 tile_jobs = int(options.get("tile_jobs", 1) or 1)
                 if tile_jobs < 0:
                     raise ValueError("tile_jobs must be >= 0")
                 continue_on_error = bool(options.get("continue_on_error", False))
                 coverage_metrics_enabled = bool(
-                    options.get("coverage_metrics", True)
-                    or coverage_min is not None
+                    options.get("coverage_metrics", True) or coverage_min is not None
                 )
                 mosaic_strategy = options.get("mosaic_strategy", "full")
                 cache_options = _normalization_cache_options(
@@ -717,28 +685,19 @@ def run_build(
                     backend_profile=backend_profile,
                     dem_stack=options.get("dem_stack"),
                 )
-                fallback_sources = (
-                    fallback_dem_paths if fill_strategy == "fallback" else []
-                )
-                normalization_cache = load_normalization_cache(
-                    output_dir / "normalized"
-                )
-                cache_hit = (
-                    normalization_cache is not None
-                    and normalization_cache.matches(
-                        sources=dem_paths,
-                        fallback_sources=fallback_sources,
-                        options=cache_options,
-                        tiles=tiles,
-                    )
+                fallback_sources = fallback_dem_paths if fill_strategy == "fallback" else []
+                normalization_cache = load_normalization_cache(output_dir / "normalized")
+                cache_hit = normalization_cache is not None and normalization_cache.matches(
+                    sources=dem_paths,
+                    fallback_sources=fallback_sources,
+                    options=cache_options,
+                    tiles=tiles,
                 )
                 tiles_for_backend = tiles
                 with perf.span("normalize"):
                     if cache_hit and normalization_cache is not None:
                         coverage_metrics = (
-                            normalization_cache.coverage
-                            if coverage_metrics_enabled
-                            else {}
+                            normalization_cache.coverage if coverage_metrics_enabled else {}
                         )
                         options = {
                             **options,
@@ -785,9 +744,7 @@ def run_build(
                         normalization_errors = dict(normalization.errors)
                         if normalization_errors:
                             tiles_for_backend = [
-                                tile
-                                for tile in tiles
-                                if tile not in normalization_errors
+                                tile for tile in tiles if tile not in normalization_errors
                             ]
                         coverage_metrics = (
                             normalization.coverage if coverage_metrics_enabled else {}
@@ -830,9 +787,7 @@ def run_build(
                         {
                             "tile": tile,
                             "status": "error",
-                            "messages": [
-                                f"Normalization failed: {normalization_errors[tile]}"
-                            ],
+                            "messages": [f"Normalization failed: {normalization_errors[tile]}"],
                         }
                         for tile in requested_tiles
                     ]
@@ -841,10 +796,7 @@ def run_build(
                         tile_statuses=tile_statuses,
                         artifacts={"scenery_dir": str(output_dir)},
                         warnings=[],
-                        errors=[
-                            f"{tile}: normalization failed"
-                            for tile in requested_tiles
-                        ],
+                        errors=[f"{tile}: normalization failed" for tile in requested_tiles],
                     )
                     result = BuildResult(build_plan=plan, build_report=report)
             if result is None:
@@ -852,10 +804,7 @@ def run_build(
                     result = backend.build(request)
                 report = {
                     **result.build_report,
-                    "tiles": [
-                        dict(tile)
-                        for tile in result.build_report.get("tiles", [])
-                    ],
+                    "tiles": [dict(tile) for tile in result.build_report.get("tiles", [])],
                     "warnings": list(result.build_report.get("warnings", [])),
                     "errors": list(result.build_report.get("errors", [])),
                 }
@@ -888,12 +837,8 @@ def run_build(
                                 "messages": [f"Normalization failed: {error}"],
                             }
                         )
-                        report.setdefault("errors", []).append(
-                            f"{tile}: normalization failed"
-                        )
-                result = BuildResult(
-                    build_plan=result.build_plan, build_report=report
-                )
+                        report.setdefault("errors", []).append(f"{tile}: normalization failed")
+                result = BuildResult(build_plan=result.build_plan, build_report=report)
         perf.stop()
     finally:
         perf.stop()
@@ -901,9 +846,7 @@ def run_build(
     if result is None:  # pragma: no cover - defensive guard
         raise RuntimeError("Build did not produce a report.")
 
-    report = _attach_performance(
-        dict(result.build_report), perf, output_dir, options
-    )
+    report = _attach_performance(dict(result.build_report), perf, output_dir, options)
     result = BuildResult(build_plan=result.build_plan, build_report=report)
     bundle_path = None
     if options.get("bundle_diagnostics"):
@@ -911,9 +854,7 @@ def run_build(
         report_artifacts = dict(result.build_report.get("artifacts", {}))
         report_artifacts["diagnostics_bundle"] = str(bundle_path)
         report_with_bundle = {**result.build_report, "artifacts": report_artifacts}
-        result = BuildResult(
-            build_plan=result.build_plan, build_report=report_with_bundle
-        )
+        result = BuildResult(build_plan=result.build_plan, build_report=report_with_bundle)
     validate_build_plan(result.build_plan)
     validate_build_report(result.build_report)
     write_json(output_dir / "build_plan.json", result.build_plan)

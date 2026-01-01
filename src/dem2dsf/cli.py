@@ -150,9 +150,7 @@ def _build_options_from_args(
         normalize=not bool(getattr(args, "skip_normalize", False)),
         triangle_warn=getattr(args, "warn_triangles", None),
         triangle_max=getattr(args, "max_triangles", None),
-        allow_triangle_overage=bool(
-            getattr(args, "allow_triangle_overage", False)
-        ),
+        allow_triangle_overage=bool(getattr(args, "allow_triangle_overage", False)),
         continue_on_error=bool(getattr(args, "continue_on_error", False)),
         coverage_min=getattr(args, "min_coverage", None),
         coverage_hard_fail=bool(getattr(args, "coverage_hard_fail", False)),
@@ -550,9 +548,7 @@ def _add_wizard_parser(subparsers: argparse._SubParsersAction) -> None:
 
 def _add_doctor_parser(subparsers: argparse._SubParsersAction) -> None:
     """Register the doctor subcommand."""
-    doctor = subparsers.add_parser(
-        "doctor", help="Check external dependencies and environment."
-    )
+    doctor = subparsers.add_parser("doctor", help="Check external dependencies and environment.")
     doctor.add_argument(
         "--runner",
         nargs="+",
@@ -567,9 +563,7 @@ def _add_doctor_parser(subparsers: argparse._SubParsersAction) -> None:
 
 def _add_autoortho_parser(subparsers: argparse._SubParsersAction) -> None:
     """Register the AutoOrtho preset subcommand."""
-    auto = subparsers.add_parser(
-        "autoortho", help="AutoOrtho preset build mode (Ortho4XP runner)."
-    )
+    auto = subparsers.add_parser("autoortho", help="AutoOrtho preset build mode (Ortho4XP runner).")
     auto.add_argument("--dem", action="append", help="Path to a DEM input file.")
     auto.add_argument(
         "--dem-stack",
@@ -851,9 +845,7 @@ def _add_patch_parser(subparsers: argparse._SubParsersAction) -> None:
 
 def _add_scan_parser(subparsers: argparse._SubParsersAction) -> None:
     """Register the Custom Scenery scan subcommand."""
-    scan = subparsers.add_parser(
-        "scan", help="Scan Custom Scenery for conflicting tiles."
-    )
+    scan = subparsers.add_parser("scan", help="Scan Custom Scenery for conflicting tiles.")
     scan.add_argument(
         "--scenery-root",
         required=True,
@@ -872,13 +864,9 @@ def _add_scan_parser(subparsers: argparse._SubParsersAction) -> None:
 
 def _add_cache_parser(subparsers: argparse._SubParsersAction) -> None:
     """Register the Ortho4XP cache inspection subcommands."""
-    cache = subparsers.add_parser(
-        "cache", help="Inspect or purge Ortho4XP cache entries."
-    )
+    cache = subparsers.add_parser("cache", help="Inspect or purge Ortho4XP cache entries.")
     cache_sub = cache.add_subparsers(dest="cache_command", required=True)
-    cache_list = cache_sub.add_parser(
-        "list", help="List cache entries for a tile."
-    )
+    cache_list = cache_sub.add_parser("list", help="List cache entries for a tile.")
     cache_list.add_argument(
         "--ortho-root",
         required=True,
@@ -895,9 +883,7 @@ def _add_cache_parser(subparsers: argparse._SubParsersAction) -> None:
         "--output",
         help="Optional path to write the cache report JSON.",
     )
-    cache_purge = cache_sub.add_parser(
-        "purge", help="Delete cache entries for a tile."
-    )
+    cache_purge = cache_sub.add_parser("purge", help="Delete cache entries for a tile.")
     cache_purge.add_argument(
         "--ortho-root",
         required=True,
@@ -927,9 +913,7 @@ def _add_cache_parser(subparsers: argparse._SubParsersAction) -> None:
 
 def _add_publish_parser(subparsers: argparse._SubParsersAction) -> None:
     """Register the publish subcommand."""
-    publish = subparsers.add_parser(
-        "publish", help="Package a build directory into a zip archive."
-    )
+    publish = subparsers.add_parser("publish", help="Package a build directory into a zip archive.")
     publish.add_argument(
         "--build-dir",
         default="build",
@@ -963,9 +947,7 @@ def _add_publish_parser(subparsers: argparse._SubParsersAction) -> None:
 
 def _add_presets_parser(subparsers: argparse._SubParsersAction) -> None:
     """Register the preset library subcommands."""
-    presets = subparsers.add_parser(
-        "presets", help="List or inspect built-in presets."
-    )
+    presets = subparsers.add_parser("presets", help="List or inspect built-in presets.")
     preset_sub = presets.add_subparsers(dest="preset_command", required=True)
     preset_list = preset_sub.add_parser("list", help="List available presets.")
     preset_list.add_argument(
@@ -982,25 +964,18 @@ def _add_presets_parser(subparsers: argparse._SubParsersAction) -> None:
         default="text",
         help="Output format.",
     )
-    preset_import = preset_sub.add_parser(
-        "import", help="Import user-defined presets from JSON."
-    )
+    preset_import = preset_sub.add_parser("import", help="Import user-defined presets from JSON.")
     preset_import.add_argument("path", help="Input JSON file.")
     preset_import.add_argument(
         "--user-path",
-        help=(
-            "User preset file destination. Defaults to "
-            f"{default_user_presets_path()!s}."
-        ),
+        help=(f"User preset file destination. Defaults to {default_user_presets_path()!s}."),
     )
     preset_import.add_argument(
         "--replace",
         action="store_true",
         help="Replace existing user presets instead of merging.",
     )
-    preset_export = preset_sub.add_parser(
-        "export", help="Export user-defined presets to JSON."
-    )
+    preset_export = preset_sub.add_parser("export", help="Export user-defined presets to JSON.")
     preset_export.add_argument(
         "--output",
         default="-",
@@ -1008,10 +983,7 @@ def _add_presets_parser(subparsers: argparse._SubParsersAction) -> None:
     )
     preset_export.add_argument(
         "--user-path",
-        help=(
-            "User preset file source. Defaults to "
-            f"{default_user_presets_path()!s}."
-        ),
+        help=(f"User preset file source. Defaults to {default_user_presets_path()!s}."),
     )
     preset_export.add_argument(
         "--include-builtins",
@@ -1231,9 +1203,7 @@ def main(argv: list[str] | None = None) -> int:
             for error in errors:
                 LOGGER.error("Overlay error: %s", error)
             return 1
-        LOGGER.info(
-            "Overlay report written to %s", output_dir / "overlay_report.json"
-        )
+        LOGGER.info("Overlay report written to %s", output_dir / "overlay_report.json")
         return 0
     if args.command == "patch":
         overrides = {}
@@ -1257,9 +1227,7 @@ def main(argv: list[str] | None = None) -> int:
             tiles=args.tile or None,
         )
         if args.output:
-            Path(args.output).write_text(
-                json.dumps(report, indent=2), encoding="utf-8"
-            )
+            Path(args.output).write_text(json.dumps(report, indent=2), encoding="utf-8")
         conflicts = report.get("conflicts", [])
         LOGGER.info("Found %s conflict(s).", len(conflicts))
         snippet = report.get("suggested_order_snippet")
@@ -1280,14 +1248,10 @@ def main(argv: list[str] | None = None) -> int:
             payload = {
                 "ortho_root": str(ortho_root),
                 "tile": args.tile,
-                "entries": {
-                    key: [str(path) for path in paths] for key, paths in entries.items()
-                },
+                "entries": {key: [str(path) for path in paths] for key, paths in entries.items()},
             }
             if args.output:
-                Path(args.output).write_text(
-                    json.dumps(payload, indent=2), encoding="utf-8"
-                )
+                Path(args.output).write_text(json.dumps(payload, indent=2), encoding="utf-8")
             else:
                 print(json.dumps(payload, indent=2))
             return 0
@@ -1299,9 +1263,7 @@ def main(argv: list[str] | None = None) -> int:
                 dry_run=not args.confirm,
             )
             if args.output:
-                Path(args.output).write_text(
-                    json.dumps(report, indent=2), encoding="utf-8"
-                )
+                Path(args.output).write_text(json.dumps(report, indent=2), encoding="utf-8")
             else:
                 print(json.dumps(report, indent=2))
             return 0
@@ -1318,13 +1280,9 @@ def main(argv: list[str] | None = None) -> int:
                 if response:
                     sevenzip_path = Path(response)
                 elif not args.allow_missing_7z:
-                    parser.error(
-                        "7z not found; pass --sevenzip-path or --allow-missing-7z."
-                    )
+                    parser.error("7z not found; pass --sevenzip-path or --allow-missing-7z.")
             elif not args.allow_missing_7z:
-                parser.error(
-                    "7z not found; pass --sevenzip-path or --allow-missing-7z."
-                )
+                parser.error("7z not found; pass --sevenzip-path or --allow-missing-7z.")
         result = publish_build(
             Path(args.build_dir),
             Path(args.output),
@@ -1367,9 +1325,7 @@ def main(argv: list[str] | None = None) -> int:
             except (OSError, json.JSONDecodeError) as exc:
                 LOGGER.error("Failed to load presets: %s", exc)
                 return 1
-            dest_path = (
-                Path(args.user_path) if args.user_path else default_user_presets_path()
-            )
+            dest_path = Path(args.user_path) if args.user_path else default_user_presets_path()
             existing = {} if args.replace else load_user_presets(dest_path)
             merged = dict(existing)
             merged.update(incoming)
@@ -1381,10 +1337,7 @@ def main(argv: list[str] | None = None) -> int:
             user_presets = load_user_presets(user_path)
             presets_to_export = dict(user_presets)
             if args.include_builtins:
-                builtins = {
-                    preset.name: preset
-                    for preset in list_presets(include_user=False)
-                }
+                builtins = {preset.name: preset for preset in list_presets(include_user=False)}
                 presets_to_export = dict(builtins)
                 presets_to_export.update(user_presets)
             payload = serialize_presets(presets_to_export)

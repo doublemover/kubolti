@@ -25,7 +25,7 @@ def _extract_texture_refs(text: str) -> list[str]:
         line = raw_line.strip()
         if ".dds" not in line.lower():
             continue
-        token = line.split()[-1].strip("\"")
+        token = line.split()[-1].strip('"')
         if token.lower().endswith(".dds"):
             refs.append(token)
     return refs

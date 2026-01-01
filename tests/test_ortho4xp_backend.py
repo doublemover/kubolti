@@ -230,10 +230,7 @@ def test_ortho4xp_backend_multiple_dems(tmp_path) -> None:
     backend = Ortho4XPBackend()
     result = backend.build(request)
 
-    assert any(
-        "Multiple DEMs provided" in warning
-        for warning in result.build_report["warnings"]
-    )
+    assert any("Multiple DEMs provided" in warning for warning in result.build_report["warnings"])
 
 
 def test_ortho4xp_backend_invalid_density(tmp_path) -> None:
@@ -275,9 +272,7 @@ def test_validate_runner_requires_root(monkeypatch, tmp_path) -> None:
 def test_validate_runner_with_root(tmp_path) -> None:
     runner = tmp_path / "ortho4xp_runner.py"
     runner.write_text("stub", encoding="utf-8")
-    error = _validate_runner(
-        [sys.executable, str(runner), "--ortho-root", str(tmp_path)]
-    )
+    error = _validate_runner([sys.executable, str(runner), "--ortho-root", str(tmp_path)])
     assert error is None
 
 

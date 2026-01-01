@@ -108,6 +108,7 @@ def test_apply_backend_profile_requires_full_coverage(tmp_path) -> None:
             ),
         )
 
+
 def test_apply_backend_profile_requires_full_coverage_nan(tmp_path) -> None:
     src = tmp_path / "src.tif"
     dst = tmp_path / "dst.tif"

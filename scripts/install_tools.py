@@ -14,8 +14,8 @@ from dem2dsf.tools.installer import (
     InstallResult,
     ensure_sevenzip,
     ensure_tool_config,
-    find_dsftool,
     find_ddstool,
+    find_dsftool,
     find_ortho4xp,
     install_from_archive,
     install_from_url,
@@ -96,20 +96,16 @@ def _install_7zip(interactive: bool) -> bool:
             if (
                 not interactive
                 or _prompt(
-                    "Install 7-Zip via winget? "
-                    "(Requires administrator privileges/UAC.) [y/N]: "
+                    "Install 7-Zip via winget? (Requires administrator privileges/UAC.) [y/N]: "
                 ).lower()
                 == "y"
             ):
-                return _run_install_command(
-                    ["winget", "install", "-e", "--id", "7zip.7zip"]
-                )
+                return _run_install_command(["winget", "install", "-e", "--id", "7zip.7zip"])
         if _ensure_choco(interactive):
             if (
                 not interactive
                 or _prompt(
-                    "Install 7-Zip via choco? "
-                    "(Requires administrator privileges/UAC.) [y/N]: "
+                    "Install 7-Zip via choco? (Requires administrator privileges/UAC.) [y/N]: "
                 ).lower()
                 == "y"
             ):
@@ -120,9 +116,7 @@ def _install_7zip(interactive: bool) -> bool:
     else:
         if shutil.which("apt-get"):
             if not interactive or _prompt("Install 7-Zip via apt-get? [y/N]: ").lower() == "y":
-                return _run_install_command(
-                    ["sudo", "apt-get", "install", "-y", "p7zip-full"]
-                )
+                return _run_install_command(["sudo", "apt-get", "install", "-y", "p7zip-full"])
         if shutil.which("dnf"):
             if not interactive or _prompt("Install 7-Zip via dnf? [y/N]: ").lower() == "y":
                 return _run_install_command(["sudo", "dnf", "install", "-y", "p7zip"])
@@ -214,6 +208,7 @@ def _ensure_dsftool(
             )
     return InstallResult("dsftool", "missing", None, "not installed")
 
+
 def _ensure_ortho4xp(
     search_dirs: list[Path],
     *,
@@ -239,9 +234,7 @@ def _ensure_ortho4xp(
             if existing:
                 found = find_ortho4xp([existing])
                 if found:
-                    return InstallResult(
-                        "ortho4xp", "ok", found, f"using {existing}"
-                    )
+                    return InstallResult("ortho4xp", "ok", found, f"using {existing}")
         return InstallResult("ortho4xp", "error", None, str(exc))
 
 
@@ -350,14 +343,10 @@ def main() -> int:
         if "ddstool" in tools or "xptools" in tools or "dsftool" in tools:
             ddstool_path = find_ddstool(search_dirs)
             if ddstool_path:
-                results.append(
-                    InstallResult("ddstool", "ok", ddstool_path, "found")
-                )
+                results.append(InstallResult("ddstool", "ok", ddstool_path, "found"))
                 tool_paths["ddstool"] = ddstool_path
             else:
-                results.append(
-                    InstallResult("ddstool", "missing", None, "not found")
-                )
+                results.append(InstallResult("ddstool", "missing", None, "not found"))
 
     for result in results:
         path = str(result.path) if result.path else "-"

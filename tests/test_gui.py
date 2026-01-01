@@ -165,9 +165,7 @@ def test_build_form_to_request() -> None:
 
 def test_build_form_to_request_with_ortho_root(monkeypatch) -> None:
     runner_path = Path("runner.py")
-    monkeypatch.setattr(
-        gui, "_default_ortho_runner", lambda: [sys.executable, str(runner_path)]
-    )
+    monkeypatch.setattr(gui, "_default_ortho_runner", lambda: [sys.executable, str(runner_path)])
 
     values = {
         "dems": "a.tif",
@@ -216,9 +214,7 @@ def test_build_form_to_request_uses_tool_defaults(monkeypatch) -> None:
         }
 
     monkeypatch.setattr(gui, "load_tool_paths", fake_load_tool_paths)
-    monkeypatch.setattr(
-        gui, "_default_ortho_runner", lambda: [sys.executable, "runner.py"]
-    )
+    monkeypatch.setattr(gui, "_default_ortho_runner", lambda: [sys.executable, "runner.py"])
     monkeypatch.setattr(gui, "ortho_root_from_paths", lambda _paths: Path("C:/Ortho4XP"))
 
     values = {

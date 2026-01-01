@@ -95,12 +95,8 @@ def scan_custom_scenery(root: Path, *, tiles: list[str] | None = None) -> dict[s
         tile_to_packs[tile] = sorted(set(packs))
 
     scenery_packs = _read_scenery_packs(root)
-    suggested_order = (
-        suggested_scenery_order(scenery_packs) if scenery_packs else None
-    )
-    suggested_snippet = (
-        scenery_order_snippet(suggested_order) if suggested_order else None
-    )
+    suggested_order = suggested_scenery_order(scenery_packs) if scenery_packs else None
+    suggested_snippet = scenery_order_snippet(suggested_order) if suggested_order else None
     conflicts: list[dict[str, Any]] = []
     for tile, packs in sorted(tile_to_packs.items()):
         if len(packs) < 2:

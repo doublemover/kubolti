@@ -10,9 +10,7 @@ def pytest_collection_modifyitems(config, items) -> None:
     markexpr = config.option.markexpr or ""
     if "integration" in markexpr:
         return
-    skip_integration = pytest.mark.skip(
-        reason="integration tests run only with -m integration"
-    )
+    skip_integration = pytest.mark.skip(reason="integration tests run only with -m integration")
     for item in items:
         if "integration" in item.keywords:
             item.add_marker(skip_integration)
@@ -21,6 +19,4 @@ def pytest_collection_modifyitems(config, items) -> None:
 @pytest.fixture(autouse=True)
 def _isolate_tool_paths(monkeypatch, tmp_path) -> None:
     """Prevent local tool configs from bleeding into tests."""
-    monkeypatch.setenv(
-        tool_config.ENV_TOOL_PATHS, str(tmp_path / "missing_tool_paths.json")
-    )
+    monkeypatch.setenv(tool_config.ENV_TOOL_PATHS, str(tmp_path / "missing_tool_paths.json"))

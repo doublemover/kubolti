@@ -65,10 +65,7 @@ def test_roundtrip_dsf_raises(tmp_path) -> None:
 def test_roundtrip_dsf_7z_requires_newer_version(tmp_path) -> None:
     tool = tmp_path / "dsftool.py"
     tool.write_text(
-        "import sys\n"
-        "if '--version' in sys.argv:\n"
-        "    print('DSFTool 2.1')\n"
-        "    sys.exit(0)\n",
+        "import sys\nif '--version' in sys.argv:\n    print('DSFTool 2.1')\n    sys.exit(0)\n",
         encoding="utf-8",
     )
     dsf_path = tmp_path / "tile.dsf"

@@ -137,9 +137,7 @@ def _write_trend(
 
 def main() -> int:
     """CLI entrypoint for CI performance checks."""
-    parser = argparse.ArgumentParser(
-        description="Run lightweight performance benchmarks for CI."
-    )
+    parser = argparse.ArgumentParser(description="Run lightweight performance benchmarks for CI.")
     parser.add_argument(
         "--output-dir",
         default="perf_ci",
@@ -246,13 +244,9 @@ def main() -> int:
 
     failures = []
     if normalize_seconds > args.normalize_max_seconds:
-        failures.append(
-            f"normalize {normalize_seconds:.3f}s > {args.normalize_max_seconds:.3f}s"
-        )
+        failures.append(f"normalize {normalize_seconds:.3f}s > {args.normalize_max_seconds:.3f}s")
     if publish_seconds > args.publish_max_seconds:
-        failures.append(
-            f"publish {publish_seconds:.3f}s > {args.publish_max_seconds:.3f}s"
-        )
+        failures.append(f"publish {publish_seconds:.3f}s > {args.publish_max_seconds:.3f}s")
 
     baseline_path = Path(args.baseline) if args.baseline else None
     if baseline_path:
@@ -266,9 +260,7 @@ def main() -> int:
                     if delta is None:
                         continue
                     if delta > max_regression:
-                        failures.append(
-                            f"{key} regression {delta:.2f}% > {max_regression:.2f}%"
-                        )
+                        failures.append(f"{key} regression {delta:.2f}% > {max_regression:.2f}%")
         elif baseline_path.exists():
             print(f"Baseline file invalid: {baseline_path}")
     if args.write_baseline and baseline_path:

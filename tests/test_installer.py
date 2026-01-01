@@ -96,9 +96,7 @@ def test_extract_archive_tar(tmp_path: Path) -> None:
     assert (destination / "root") in roots
 
 
-def test_extract_archive_tar_empty_member(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_extract_archive_tar_empty_member(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     archive = tmp_path / "empty.tar"
     archive.write_text("stub", encoding="utf-8")
 
@@ -198,9 +196,7 @@ def test_find_ddstool_in_tree(tmp_path: Path) -> None:
 
 def test_install_from_archive_finds_executable(tmp_path: Path) -> None:
     exe_name = _exe_name("DSFTool")
-    archive = _make_zip(
-        tmp_path / "tool.zip", f"pkg/{exe_name}", content=_exe_payload()
-    )
+    archive = _make_zip(tmp_path / "tool.zip", f"pkg/{exe_name}", content=_exe_payload())
     destination = tmp_path / "install"
 
     result = installer.install_from_archive(
@@ -214,9 +210,7 @@ def test_install_from_archive_finds_executable(tmp_path: Path) -> None:
 
 def test_install_from_url_file(tmp_path: Path) -> None:
     exe_name = _exe_name("DSFTool")
-    archive = _make_zip(
-        tmp_path / "tool.zip", f"pkg/{exe_name}", content=_exe_payload()
-    )
+    archive = _make_zip(tmp_path / "tool.zip", f"pkg/{exe_name}", content=_exe_payload())
     destination = tmp_path / "download"
 
     result = installer.install_from_url(
@@ -242,7 +236,7 @@ def test_find_ortho4xp_missing(tmp_path: Path) -> None:
     assert found is None
 
 
-def test_install_ortho4xp_requires_git(tmp_path: Path, monkeypatch) -> None:    
+def test_install_ortho4xp_requires_git(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setattr(installer.shutil, "which", lambda *_: None)
     with pytest.raises(RuntimeError, match="git is required"):
         installer.install_ortho4xp("https://example.com/repo.git", tmp_path / "ortho")
@@ -273,7 +267,7 @@ def test_install_ortho4xp_git_clone(monkeypatch, tmp_path: Path) -> None:
 
 
 def test_install_ortho4xp_from_archive(tmp_path: Path) -> None:
-    archive = _make_zip(tmp_path / "ortho.zip", "Ortho4XP/Ortho4XP_v140.py")    
+    archive = _make_zip(tmp_path / "ortho.zip", "Ortho4XP/Ortho4XP_v140.py")
     destination = tmp_path / "ortho"
 
     script = installer.install_ortho4xp(archive.as_uri(), destination)

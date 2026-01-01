@@ -165,9 +165,7 @@ def _apply_tool_defaults(
     """Fill tool defaults from tool_paths.json when GUI fields are empty."""
     tool_paths = load_tool_paths()
     if options.get("runner") is None:
-        ortho_root_path = (
-            Path(ortho_root) if ortho_root else ortho_root_from_paths(tool_paths)
-        )
+        ortho_root_path = Path(ortho_root) if ortho_root else ortho_root_from_paths(tool_paths)
         runner = _default_ortho_runner()
         if ortho_root_path and runner:
             options["runner"] = [*runner, "--ortho-root", str(ortho_root_path)]
@@ -219,13 +217,10 @@ def build_form_to_request(
         "autoortho": bool(values.get("autoortho", False)),
         "target_crs": values.get("target_crs") or "EPSG:4326",
         "resampling": values.get("resampling", "bilinear"),
-        "target_resolution": parse_optional_float(
-            values.get("target_resolution", "")
-        ),
+        "target_resolution": parse_optional_float(values.get("target_resolution", "")),
         "dst_nodata": parse_optional_float(values.get("dst_nodata", "")),
         "fill_strategy": values.get("fill_strategy", "none"),
-        "fill_value": parse_optional_float(values.get("fill_value", "") or "0")
-        or 0.0,
+        "fill_value": parse_optional_float(values.get("fill_value", "") or "0") or 0.0,
         "fallback_dem_paths": parse_list(values.get("fallback_dems", "")),
         "normalize": not bool(values.get("skip_normalize", False)),
         "tile_jobs": parse_optional_int(values.get("tile_jobs", "") or "1") or 1,
@@ -244,12 +239,10 @@ def build_form_to_request(
         "coverage_hard_fail": bool(values.get("coverage_hard_fail", False)),
         "coverage_metrics": bool(values.get("coverage_metrics", True)),
         "runner_timeout": parse_optional_float(values.get("runner_timeout", "")),
-        "runner_retries": parse_optional_int(values.get("runner_retries", "") or "0")
-        or 0,
+        "runner_retries": parse_optional_int(values.get("runner_retries", "") or "0") or 0,
         "runner_stream_logs": bool(values.get("runner_stream_logs", False)),
         "dsftool_timeout": parse_optional_float(values.get("dsftool_timeout", "")),
-        "dsftool_retries": parse_optional_int(values.get("dsftool_retries", "") or "0")
-        or 0,
+        "dsftool_retries": parse_optional_int(values.get("dsftool_retries", "") or "0") or 0,
         "bundle_diagnostics": bool(values.get("bundle_diagnostics", False)),
     }
     ortho_root = values.get("ortho_root") or None
@@ -417,9 +410,7 @@ def launch_gui() -> None:
             build_vars["ortho_root"].set(path)
 
     def browse_ortho_python() -> None:
-        path = filedialog.askopenfilename(
-            title="Select Ortho4XP Python executable"
-        )
+        path = filedialog.askopenfilename(title="Select Ortho4XP Python executable")
         if path:
             build_vars["ortho_python"].set(path)
 
@@ -455,9 +446,7 @@ def launch_gui() -> None:
                 messagebox.showerror("Missing input", "Provide tile names.")
                 return
             if not dem_paths and not options.get("dem_stack_path"):
-                messagebox.showerror(
-                    "Missing input", "Provide DEMs or a DEM stack."
-                )
+                messagebox.showerror("Missing input", "Provide DEMs or a DEM stack.")
                 return
             invalid_tiles = _invalid_tiles(tiles)
             if invalid_tiles:
@@ -496,9 +485,7 @@ def launch_gui() -> None:
             messagebox.showerror("Publish failed", str(exc))
 
     def add_row(parent, label, widget, row) -> None:
-        ttk.Label(parent, text=label).grid(
-            row=row, column=0, sticky="w", padx=4, pady=4
-        )
+        ttk.Label(parent, text=label).grid(row=row, column=0, sticky="w", padx=4, pady=4)
         widget.grid(row=row, column=1, sticky="ew", padx=4, pady=4)
 
     def add_row_with_button(parent, label, widget, row, button) -> None:
@@ -610,14 +597,10 @@ def launch_gui() -> None:
         variable=build_vars["coverage_metrics"],
     ).grid(row=row, column=1, sticky="w", padx=4, pady=4)
     row += 1
-    triangle_warn_entry = ttk.Entry(
-        build_frame, textvariable=build_vars["triangle_warn"]
-    )
+    triangle_warn_entry = ttk.Entry(build_frame, textvariable=build_vars["triangle_warn"])
     add_row(build_frame, "Triangle warn threshold", triangle_warn_entry, row)
     row += 1
-    triangle_max_entry = ttk.Entry(
-        build_frame, textvariable=build_vars["triangle_max"]
-    )
+    triangle_max_entry = ttk.Entry(build_frame, textvariable=build_vars["triangle_max"])
     add_row(build_frame, "Triangle max threshold", triangle_max_entry, row)
     row += 1
     ttk.Checkbutton(
@@ -629,14 +612,10 @@ def launch_gui() -> None:
     runner_entry = ttk.Entry(build_frame, textvariable=build_vars["runner_cmd"])
     add_row(build_frame, "Runner override", runner_entry, row)
     row += 1
-    runner_timeout_entry = ttk.Entry(
-        build_frame, textvariable=build_vars["runner_timeout"]
-    )
+    runner_timeout_entry = ttk.Entry(build_frame, textvariable=build_vars["runner_timeout"])
     add_row(build_frame, "Runner timeout (s)", runner_timeout_entry, row)
     row += 1
-    runner_retries_entry = ttk.Entry(
-        build_frame, textvariable=build_vars["runner_retries"]
-    )
+    runner_retries_entry = ttk.Entry(build_frame, textvariable=build_vars["runner_retries"])
     add_row(build_frame, "Runner retries", runner_retries_entry, row)
     row += 1
     ttk.Checkbutton(
@@ -660,9 +639,7 @@ def launch_gui() -> None:
         ttk.Button(build_frame, text="Browse", command=browse_ortho_root),
     )
     row += 1
-    ortho_python_entry = ttk.Entry(
-        build_frame, textvariable=build_vars["ortho_python"]
-    )
+    ortho_python_entry = ttk.Entry(build_frame, textvariable=build_vars["ortho_python"])
     add_row_with_button(
         build_frame,
         "Ortho4XP python",
@@ -686,14 +663,10 @@ def launch_gui() -> None:
         ttk.Button(build_frame, text="Browse", command=browse_dsftool),
     )
     row += 1
-    dsftool_timeout_entry = ttk.Entry(
-        build_frame, textvariable=build_vars["dsftool_timeout"]
-    )
+    dsftool_timeout_entry = ttk.Entry(build_frame, textvariable=build_vars["dsftool_timeout"])
     add_row(build_frame, "DSFTool timeout (s)", dsftool_timeout_entry, row)
     row += 1
-    dsftool_retries_entry = ttk.Entry(
-        build_frame, textvariable=build_vars["dsftool_retries"]
-    )
+    dsftool_retries_entry = ttk.Entry(build_frame, textvariable=build_vars["dsftool_retries"])
     add_row(build_frame, "DSFTool retries", dsftool_retries_entry, row)
     row += 1
     target_crs_entry = ttk.Entry(build_frame, textvariable=build_vars["target_crs"])
@@ -706,9 +679,7 @@ def launch_gui() -> None:
     )
     add_row(build_frame, "Resampling", resampling_box, row)
     row += 1
-    target_res_entry = ttk.Entry(
-        build_frame, textvariable=build_vars["target_resolution"]
-    )
+    target_res_entry = ttk.Entry(build_frame, textvariable=build_vars["target_resolution"])
     add_row(build_frame, "Target resolution (m)", target_res_entry, row)
     row += 1
     dst_nodata_entry = ttk.Entry(build_frame, textvariable=build_vars["dst_nodata"])
@@ -746,9 +717,9 @@ def launch_gui() -> None:
         build_frame, text="Enrich XP12 rasters", variable=build_vars["enrich_xp12"]
     ).grid(row=row, column=1, sticky="w", padx=4, pady=4)
     row += 1
-    ttk.Checkbutton(
-        build_frame, text="Profile build", variable=build_vars["profile"]
-    ).grid(row=row, column=1, sticky="w", padx=4, pady=4)
+    ttk.Checkbutton(build_frame, text="Profile build", variable=build_vars["profile"]).grid(
+        row=row, column=1, sticky="w", padx=4, pady=4
+    )
     row += 1
     metrics_entry = ttk.Entry(build_frame, textvariable=build_vars["metrics_json"])
     add_row_with_button(
@@ -765,9 +736,9 @@ def launch_gui() -> None:
         variable=build_vars["bundle_diagnostics"],
     ).grid(row=row, column=1, sticky="w", padx=4, pady=4)
     row += 1
-    ttk.Checkbutton(
-        build_frame, text="Dry run", variable=build_vars["dry_run"]
-    ).grid(row=row, column=1, sticky="w", padx=4, pady=4)
+    ttk.Checkbutton(build_frame, text="Dry run", variable=build_vars["dry_run"]).grid(
+        row=row, column=1, sticky="w", padx=4, pady=4
+    )
     row += 1
     ttk.Button(build_frame, text="Run Build", command=on_build).grid(
         row=row, column=1, sticky="e", padx=4, pady=8
@@ -786,9 +757,8 @@ def launch_gui() -> None:
             publish_frame,
             text="Browse",
             command=lambda: publish_vars["build_dir"].set(
-                filedialog.askdirectory(title="Select build directory") or publish_vars[
-                    "build_dir"
-                ].get()
+                filedialog.askdirectory(title="Select build directory")
+                or publish_vars["build_dir"].get()
             ),
         ),
     )

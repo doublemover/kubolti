@@ -104,6 +104,7 @@ def test_apply_coverage_metrics() -> None:
 
     assert report["tiles"][0]["metrics"]["coverage"]["coverage_after"] == 0.9
 
+
 def test_triangle_guardrails(monkeypatch, tmp_path: Path) -> None:
     class DummyEstimate:
         def __init__(self, count: int) -> None:
@@ -412,6 +413,7 @@ def test_apply_dsf_validation_parse_error(monkeypatch, tmp_path: Path) -> None:
     dsf_path.write_text("dsf", encoding="utf-8")
 
     monkeypatch.setattr(build, "roundtrip_dsf", lambda *_: None)
+
     def raise_properties(*_args):
         raise ValueError("bad")
 
@@ -438,6 +440,7 @@ def test_apply_dsf_validation_mismatch(monkeypatch, tmp_path: Path) -> None:
     build._apply_dsf_validation(report, {"dsftool": ["tool"]}, output_dir)
 
     assert report["errors"]
+
 
 def test_run_build_with_stack(monkeypatch, tmp_path: Path) -> None:
     output_dir = tmp_path / "out"

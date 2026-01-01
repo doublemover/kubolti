@@ -124,18 +124,14 @@ class Ortho4XPBackend:
                     {
                         "tile": tile,
                         "status": "error",
-                        "messages": [
-                            f"Normalization failed: {normalization_errors[tile]}"
-                        ],
+                        "messages": [f"Normalization failed: {normalization_errors[tile]}"],
                     }
                 )
                 errors.append(f"{tile}: normalization failed")
                 continue
             tile_dem = Path(tile_dem_paths.get(tile, dem_path)) if dem_path else None
             if tile_dem is None:
-                tile_statuses.append(
-                    {"tile": tile, "status": "error", "messages": ["missing DEM"]}
-                )
+                tile_statuses.append({"tile": tile, "status": "error", "messages": ["missing DEM"]})
                 continue
             if not tile_dem.exists():
                 tile_statuses.append(

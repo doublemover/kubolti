@@ -106,9 +106,7 @@ def bundle_diagnostics(
     if include_logs:
         paths.extend(_collect_logs(build_dir))
 
-    resolved_profile_dir = (
-        profile_dir.expanduser() if profile_dir else default_profile_dir()
-    )
+    resolved_profile_dir = profile_dir.expanduser() if profile_dir else default_profile_dir()
     if include_profiles:
         paths.extend(_collect_profiles(resolved_profile_dir))
 

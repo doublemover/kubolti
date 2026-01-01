@@ -17,6 +17,7 @@ try:
 except ImportError:
     stealth_sync = None
 
+
 def collect_urls(spec_path: Path) -> list[str]:
     """Collect reference URLs from a spec or URL list."""
     text = spec_path.read_text(encoding="utf-8")
@@ -207,9 +208,7 @@ def main() -> int:
                 out_path.write_text(
                     text.encode("ascii", "ignore").decode("ascii"), encoding="ascii"
                 )
-                result.update(
-                    {"status": "ok", "method": "httpx", "path": str(out_path)}
-                )
+                result.update({"status": "ok", "method": "httpx", "path": str(out_path)})
             except Exception as exc:
                 if args.no_playwright:
                     result["error"] = f"{type(exc).__name__}: {exc}"

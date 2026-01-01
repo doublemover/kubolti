@@ -132,12 +132,8 @@ def _write_logs(
     log_dir = output_dir / "runner_logs"
     log_dir.mkdir(parents=True, exist_ok=True)
     suffix = "" if attempt == 1 else f".attempt{attempt}"
-    (log_dir / f"ortho4xp_{tile}{suffix}.stdout.log").write_text(
-        result.stdout, encoding="utf-8"
-    )
-    (log_dir / f"ortho4xp_{tile}{suffix}.stderr.log").write_text(
-        result.stderr, encoding="utf-8"
-    )
+    (log_dir / f"ortho4xp_{tile}{suffix}.stdout.log").write_text(result.stdout, encoding="utf-8")
+    (log_dir / f"ortho4xp_{tile}{suffix}.stderr.log").write_text(result.stderr, encoding="utf-8")
     events = parse_runner_events(result.stdout, result.stderr)
     (log_dir / f"ortho4xp_{tile}{suffix}.events.json").write_text(
         json.dumps(events, indent=2), encoding="utf-8"
@@ -229,9 +225,7 @@ def _run_with_config(
             restore_config(config_path, original_config)
 
 
-def _min_angle_from_config(
-    config_path: Path, config_updates: dict[str, object]
-) -> float | None:
+def _min_angle_from_config(config_path: Path, config_updates: dict[str, object]) -> float | None:
     if "min_angle" in config_updates:
         try:
             return float(config_updates["min_angle"])
@@ -313,17 +307,13 @@ def main() -> int:
 
     try:
         script_path = (
-            Path(args.ortho_script)
-            if args.ortho_script
-            else find_ortho4xp_script(ortho_root)
+            Path(args.ortho_script) if args.ortho_script else find_ortho4xp_script(ortho_root)
         )
     except Ortho4XPNotFoundError as exc:
         LOGGER.error("%s", exc, extra=log_extra)
         return 2
     if args.ortho_script and not script_path.exists():
-        LOGGER.error(
-            "Ortho4XP script not found: %s", script_path, extra=log_extra
-        )
+        LOGGER.error("Ortho4XP script not found: %s", script_path, extra=log_extra)
         return 2
 
     resolved_python, version, error = probe_python_runtime(args.python_exe)
@@ -398,9 +388,7 @@ def main() -> int:
         persist_config=args.persist_config,
     )
     _write_logs(output_dir, args.tile, result, attempt=attempt)
-    if result.returncode != 0 and _needs_triangulation_retry(
-        result.stdout, result.stderr
-    ):
+    if result.returncode != 0 and _needs_triangulation_retry(result.stdout, result.stderr):
         for min_angle in _retry_min_angles(base_min_angle):
             attempt += 1
             LOGGER.warning(
@@ -427,9 +415,7 @@ def main() -> int:
         return result.returncode
 
     scenery_root = (
-        Path(args.scenery_root)
-        if args.scenery_root
-        else default_scenery_root(ortho_root)
+        Path(args.scenery_root) if args.scenery_root else default_scenery_root(ortho_root)
     )
     tile_dir = tile_scenery_dir(scenery_root, args.tile)
     if not tile_dir.exists():

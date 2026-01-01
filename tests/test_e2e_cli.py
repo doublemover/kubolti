@@ -162,9 +162,7 @@ def test_e2e_patch_and_overlay(tmp_path: Path) -> None:
         cwd=repo_root,
     )
     assert (patch_dir / "patch_report.json").exists()
-    assert (
-        patch_dir / "normalized" / "tiles" / "+47+008" / "+47+008.tif"
-    ).exists()
+    assert (patch_dir / "normalized" / "tiles" / "+47+008" / "+47+008.tif").exists()
 
     terrain_dir = build_dir / "terrain"
     terrain_dir.mkdir(parents=True, exist_ok=True)

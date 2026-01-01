@@ -85,10 +85,7 @@ class PerfTracker:
             }
             for name, total in sorted(self._totals.items())
         }
-        events = [
-            {"name": span.name, "seconds": round(span.seconds, 6)}
-            for span in self._spans
-        ]
+        events = [{"name": span.name, "seconds": round(span.seconds, 6)} for span in self._spans]
         summary = {
             "total_seconds": round(total_seconds, 6),
             "spans": spans,
@@ -99,9 +96,7 @@ class PerfTracker:
         return summary
 
 
-def resolve_metrics_path(
-    output_dir: Path, metrics_json: str | None
-) -> Path | None:
+def resolve_metrics_path(output_dir: Path, metrics_json: str | None) -> Path | None:
     """Resolve the metrics output path from CLI or environment defaults."""
     if metrics_json:
         return Path(metrics_json)

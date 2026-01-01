@@ -35,12 +35,7 @@ def hgt_tile_name(tile: str) -> str:
 
 def elevation_data_path(root: Path, tile: str, suffix: str) -> Path:
     """Return the expected Elevation_data path for a custom DEM file."""
-    return (
-        root
-        / "Elevation_data"
-        / bucket_for_tile(tile)
-        / f"{hgt_tile_name(tile)}{suffix}"
-    )
+    return root / "Elevation_data" / bucket_for_tile(tile) / f"{hgt_tile_name(tile)}{suffix}"
 
 
 def dsf_path(root: Path, tile: str) -> Path:

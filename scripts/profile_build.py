@@ -26,9 +26,7 @@ def _add_optional_arg(args: list[str], flag: str, value: str | None) -> None:
         args.extend([flag, str(value)])
 
 
-def _build_cli_args(
-    args: argparse.Namespace, metrics_path: Path
-) -> list[str]:
+def _build_cli_args(args: argparse.Namespace, metrics_path: Path) -> list[str]:
     """Translate script arguments into dem2dsf CLI args."""
     cli_args: list[str] = ["build"]
     for dem in args.dem or []:
@@ -83,9 +81,7 @@ def main() -> int:
     parser.add_argument("--runner", nargs="+", help="Ortho4XP runner command.")
     parser.add_argument("--dsftool", nargs="+", help="DSFTool command.")
     parser.add_argument("--global-scenery", help="Global Scenery path.")
-    parser.add_argument(
-        "--enrich-xp12", action="store_true", help="Enable XP12 enrichment."
-    )
+    parser.add_argument("--enrich-xp12", action="store_true", help="Enable XP12 enrichment.")
     parser.add_argument("--target-crs", help="Override target CRS.")
     parser.add_argument(
         "--target-resolution",
@@ -106,9 +102,7 @@ def main() -> int:
         help="Fill strategy.",
     )
     parser.add_argument("--fill-value", type=float, default=0.0, help="Fill value.")
-    parser.add_argument(
-        "--fallback-dem", action="append", help="Fallback DEM path(s)."
-    )
+    parser.add_argument("--fallback-dem", action="append", help="Fallback DEM path(s).")
     parser.add_argument(
         "--skip-normalize",
         action="store_true",
@@ -121,9 +115,7 @@ def main() -> int:
         action="store_true",
         help="Allow triangle overage.",
     )
-    parser.add_argument(
-        "--autoortho", action="store_true", help="Enable AutoOrtho mode."
-    )
+    parser.add_argument("--autoortho", action="store_true", help="Enable AutoOrtho mode.")
     parser.add_argument("--dry-run", action="store_true", help="Dry run only.")
     parser.add_argument(
         "--profile-dir",
@@ -156,9 +148,7 @@ def main() -> int:
     profile_dir.mkdir(parents=True, exist_ok=True)
     slug = _tile_slug(args.tile or [])
     metrics_path = (
-        Path(args.metrics_json)
-        if args.metrics_json
-        else profile_dir / f"build_{slug}.metrics.json"
+        Path(args.metrics_json) if args.metrics_json else profile_dir / f"build_{slug}.metrics.json"
     )
     stats_path = profile_dir / f"build_{slug}.pstats"
 

@@ -12,9 +12,7 @@ from dem2dsf.publish import find_sevenzip, publish_build
 
 def main() -> int:
     """CLI entrypoint for publish benchmarks."""
-    parser = argparse.ArgumentParser(
-        description="Benchmark publish and compression performance."
-    )
+    parser = argparse.ArgumentParser(description="Benchmark publish and compression performance.")
     parser.add_argument(
         "--build-dir",
         required=True,
@@ -90,9 +88,7 @@ def main() -> int:
 
     csv_path.parent.mkdir(parents=True, exist_ok=True)
     with csv_path.open("w", newline="", encoding="utf-8") as handle:
-        writer = csv.DictWriter(
-            handle, fieldnames=["run", "seconds", "bytes", "zip_path"]
-        )
+        writer = csv.DictWriter(handle, fieldnames=["run", "seconds", "bytes", "zip_path"])
         writer.writeheader()
         writer.writerows(rows)
 

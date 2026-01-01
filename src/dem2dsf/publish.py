@@ -27,6 +27,7 @@ def _sha256(path: Path) -> str:
             digest.update(chunk)
     return digest.hexdigest()
 
+
 def _sevenzip_command(sevenzip_path: Path) -> list[str]:
     """Return the command prefix for running 7z."""
     if sevenzip_path.suffix.lower() == ".py":
@@ -51,9 +52,7 @@ def find_sevenzip(explicit_path: Path | None = None) -> Path | None:
     candidates: Iterable[Path]
     if os.name == "nt":
         candidates = [
-            _safe_path(os.environ.get("ProgramFiles", "C:/Program Files"))
-            / "7-Zip"
-            / "7z.exe",
+            _safe_path(os.environ.get("ProgramFiles", "C:/Program Files")) / "7-Zip" / "7z.exe",
             _safe_path(os.environ.get("ProgramFiles(x86)", "C:/Program Files (x86)"))
             / "7-Zip"
             / "7z.exe",
@@ -135,9 +134,7 @@ def publish_build(
             if allow_missing_sevenzip:
                 warnings.append(message)
             else:
-                raise FileNotFoundError(
-                    "7z not found; pass --sevenzip-path or allow fallback."
-                )
+                raise FileNotFoundError("7z not found; pass --sevenzip-path or allow fallback.")
         else:
             errors = _compress_dsf_archives(
                 sevenzip_used,

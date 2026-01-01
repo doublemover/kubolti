@@ -224,26 +224,18 @@ def run_wizard(
             fill_strategy,
         )
         if fill_strategy == "constant":
-            fill_value = float(
-                _prompt_optional_float("Fill value", fill_value) or fill_value
-            )
+            fill_value = float(_prompt_optional_float("Fill value", fill_value) or fill_value)
         elif fill_strategy == "fallback":
-            fallback_dem_paths = _prompt_list(
-                "Fallback DEM path(s), comma-separated: "
-            )
+            fallback_dem_paths = _prompt_list("Fallback DEM path(s), comma-separated: ")
             if not fallback_dem_paths:
-                raise ValueError(
-                    "Fallback strategy requires fallback DEM paths."
-                )
+                raise ValueError("Fallback strategy requires fallback DEM paths.")
         mosaic_strategy = _prompt_choice(
             "Mosaic strategy",
             MOSAIC_CHOICES,
             mosaic_strategy,
         )
 
-    tile_jobs = _prompt_optional_int(
-        "Tile workers (1 for serial)", options.get("tile_jobs", 1)
-    )
+    tile_jobs = _prompt_optional_int("Tile workers (1 for serial)", options.get("tile_jobs", 1))
     continue_on_error = _prompt_bool(
         "Continue on error",
         bool(options.get("continue_on_error", False)),
@@ -272,9 +264,7 @@ def run_wizard(
         "Allow triangle overage",
         bool(options.get("allow_triangle_overage", False)),
     )
-    global_scenery = _prompt_optional_str(
-        "Global Scenery path", options.get("global_scenery")
-    )
+    global_scenery = _prompt_optional_str("Global Scenery path", options.get("global_scenery"))
     enrich_xp12 = bool(options.get("enrich_xp12", False))
     if global_scenery:
         enrich_xp12 = _prompt_bool("Enrich XP12 rasters", enrich_xp12)

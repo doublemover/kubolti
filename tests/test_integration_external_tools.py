@@ -154,9 +154,7 @@ def test_integration_ortho4xp_runner_dry_run(tmp_path: Path) -> None:
         text=True,
         check=False,
     )
-    assert result.returncode == 0, (
-        f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
-    )
+    assert result.returncode == 0, f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
     assert str(script_path) in result.stdout
 
 
@@ -180,9 +178,7 @@ def test_integration_ortho4xp_entrypoint_accepts_flags() -> None:
         check=False,
     )
     output = f"{result.stdout}\n{result.stderr}".strip()
-    assert result.returncode == 0, (
-        f"Ortho4XP --help failed (code {result.returncode}).\n{output}"
-    )
+    assert result.returncode == 0, f"Ortho4XP --help failed (code {result.returncode}).\n{output}"
     required_flags = ("--tile", "--batch", "--output")
     missing = [flag for flag in required_flags if flag not in output]
     assert not missing, f"Ortho4XP help missing flags: {', '.join(missing)}"
@@ -230,9 +226,7 @@ def test_integration_xp12_enrichment(tmp_path: Path) -> None:
     target_dsf = tmp_path / global_dsf.name
     shutil.copy(global_dsf, target_dsf)
 
-    result = enrich_dsf_rasters(
-        dsftool, target_dsf, global_dsf, tmp_path / "xp12"
-    )
+    result = enrich_dsf_rasters(dsftool, target_dsf, global_dsf, tmp_path / "xp12")
     assert result.status in {"enriched", "no-op"}
 
 

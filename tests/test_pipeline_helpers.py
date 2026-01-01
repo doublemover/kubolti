@@ -258,11 +258,7 @@ def test_normalize_stack_for_tiles_backend_profile(tmp_path: Path) -> None:
         bounds=(8.0, 47.0, 9.0, 48.0),
         nodata=-9999,
     )
-    stack = DemStack(
-        layers=(
-            DemLayer(path=dem_path, priority=0, aoi=None, nodata=-9999.0),
-        )
-    )
+    stack = DemStack(layers=(DemLayer(path=dem_path, priority=0, aoi=None, nodata=-9999.0),))
 
     result = pipeline.normalize_stack_for_tiles(
         stack,
@@ -285,11 +281,7 @@ def test_normalize_stack_for_tiles_fallback_mosaic(tmp_path: Path) -> None:
     write_raster(fallback_a, data, bounds=(8.0, 47.0, 9.0, 48.0), nodata=-9999)
     write_raster(fallback_b, data, bounds=(8.0, 47.0, 9.0, 48.0), nodata=-9999)
 
-    stack = DemStack(
-        layers=(
-            DemLayer(path=dem_path, priority=0, aoi=None, nodata=-9999.0),
-        )
-    )
+    stack = DemStack(layers=(DemLayer(path=dem_path, priority=0, aoi=None, nodata=-9999.0),))
 
     result = pipeline.normalize_stack_for_tiles(
         stack,
@@ -311,9 +303,7 @@ def test_normalize_stack_for_tiles_fallback_requires_paths(tmp_path: Path) -> No
         bounds=(8.0, 47.0, 9.0, 48.0),
         nodata=-9999,
     )
-    stack = DemStack(
-        layers=(DemLayer(path=dem_path, priority=0, aoi=None, nodata=-9999.0),)
-    )
+    stack = DemStack(layers=(DemLayer(path=dem_path, priority=0, aoi=None, nodata=-9999.0),))
 
     with pytest.raises(ValueError, match="Fallback fill requires fallback DEMs"):
         pipeline.normalize_stack_for_tiles(
@@ -331,9 +321,7 @@ def test_normalize_stack_for_tiles_single_fallback(tmp_path: Path) -> None:
     data = np.array([[1, -9999], [3, 4]], dtype=np.int16)
     write_raster(dem_path, data, bounds=(8.0, 47.0, 9.0, 48.0), nodata=-9999)
     write_raster(fallback, data, bounds=(8.0, 47.0, 9.0, 48.0), nodata=-9999)
-    stack = DemStack(
-        layers=(DemLayer(path=dem_path, priority=0, aoi=None, nodata=-9999.0),)
-    )
+    stack = DemStack(layers=(DemLayer(path=dem_path, priority=0, aoi=None, nodata=-9999.0),))
 
     result = pipeline.normalize_stack_for_tiles(
         stack,
@@ -355,11 +343,7 @@ def test_normalize_stack_for_tiles_no_tile_result(monkeypatch, tmp_path: Path) -
         bounds=(8.0, 47.0, 9.0, 48.0),
         nodata=-9999,
     )
-    stack = DemStack(
-        layers=(
-            DemLayer(path=dem_path, priority=0, aoi=None, nodata=-9999.0),
-        )
-    )
+    stack = DemStack(layers=(DemLayer(path=dem_path, priority=0, aoi=None, nodata=-9999.0),))
 
     def fake_write_tile_dem(*args, **kwargs):
         return None

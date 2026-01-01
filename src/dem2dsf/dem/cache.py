@@ -95,19 +95,14 @@ class NormalizationCache:
             "tiles": list(self.tiles),
             "tile_paths": self.tile_paths,
             "mosaic_path": self.mosaic_path,
-            "coverage": {
-                tile: asdict(metrics) for tile, metrics in self.coverage.items()
-            },
+            "coverage": {tile: asdict(metrics) for tile, metrics in self.coverage.items()},
         }
 
     @classmethod
     def from_dict(cls, data: Mapping[str, Any]) -> "NormalizationCache":
-        sources = tuple(
-            SourceFingerprint.from_dict(item) for item in data.get("sources", [])
-        )
+        sources = tuple(SourceFingerprint.from_dict(item) for item in data.get("sources", []))
         fallback_sources = tuple(
-            SourceFingerprint.from_dict(item)
-            for item in data.get("fallback_sources", [])
+            SourceFingerprint.from_dict(item) for item in data.get("fallback_sources", [])
         )
         coverage = {}
         for tile, metrics in data.get("coverage", {}).items():
@@ -143,9 +138,7 @@ def load_normalization_cache(work_dir: Path) -> NormalizationCache | None:
         return None
 
 
-def write_normalization_cache(
-    work_dir: Path, cache: NormalizationCache
-) -> Path:
+def write_normalization_cache(work_dir: Path, cache: NormalizationCache) -> Path:
     """Write a normalization cache file and return its path."""
     path = cache_path(work_dir)
     path.parent.mkdir(parents=True, exist_ok=True)

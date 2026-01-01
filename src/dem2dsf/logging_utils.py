@@ -1,4 +1,5 @@
 """Logging helpers for dem2dsf CLI and tools."""
+
 from __future__ import annotations
 
 import json
@@ -21,11 +22,7 @@ class LogOptions:
 
 
 def _timestamp() -> str:
-    return (
-        datetime.now(timezone.utc)
-        .isoformat(timespec="seconds")
-        .replace("+00:00", "Z")
-    )
+    return datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
 
 
 def _extra_fields(record: logging.LogRecord) -> dict[str, Any]:
@@ -52,11 +49,7 @@ def _extra_fields(record: logging.LogRecord) -> dict[str, Any]:
         "process",
         "message",
     }
-    return {
-        key: value
-        for key, value in record.__dict__.items()
-        if key not in reserved
-    }
+    return {key: value for key, value in record.__dict__.items() if key not in reserved}
 
 
 class JsonFormatter(logging.Formatter):

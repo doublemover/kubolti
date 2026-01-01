@@ -59,9 +59,7 @@ def apply_backend_profile(
                 data = src.read(1, window=window)
                 if np.isnan(nodata):
                     if np.isnan(data).any():
-                        raise ValueError(
-                            "Backend profile requires void-free DEMs."
-                        )
+                        raise ValueError("Backend profile requires void-free DEMs.")
                 elif np.any(data == nodata):
                     raise ValueError("Backend profile requires void-free DEMs.")
         with rasterio.open(dst_path, "w", **meta) as dest:
