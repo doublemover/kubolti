@@ -179,6 +179,21 @@ def test_parse_runner_events() -> None:
     assert any(event["event"] == "overlay" for event in events)
 
 
+def test_runner_env_includes_repo_src(tmp_path: Path, monkeypatch) -> None:
+    module = _load_runner()
+    repo_root = tmp_path / "repo"
+    src_root = repo_root / "src"
+    runner_path = src_root / "dem2dsf" / "runners" / "ortho4xp.py"
+    runner_path.parent.mkdir(parents=True, exist_ok=True)
+    runner_path.write_text("# stub\n", encoding="utf-8")
+
+    monkeypatch.setattr(module, "__file__", str(runner_path))
+    monkeypatch.setenv("PYTHONPATH", "")
+
+    env = module._runner_env()
+    assert str(src_root) in env.get("PYTHONPATH", "")
+
+
 def test_triangle_retry_helpers() -> None:
     module = _load_runner()
     assert module._retry_min_angles(None) == [5.0, 0.0]

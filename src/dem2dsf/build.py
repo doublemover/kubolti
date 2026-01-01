@@ -105,12 +105,12 @@ def _build_normalization_cache(
     )
 
 
-def _resolve_tool_path(value: object) -> Path | None:
-    """Return the first path from a normalized command list."""
+def _resolve_tool_command(value: object) -> list[str] | None:
+    """Return a normalized tool command list."""
     command = _normalize_command(value)
     if not command:
         return None
-    return Path(command[0])
+    return command
 
 
 def _dsftool_kwargs(options: Mapping[str, Any]) -> dict[str, Any]:
@@ -248,17 +248,28 @@ def _validate_build_inputs(
     options: Mapping[str, Any],
 ) -> None:
     """Validate build inputs and option guardrails."""
+    tile_list = list(tiles)
+    dem_list = list(dem_paths)
     dry_run = bool(options.get("dry_run", False))
-    for tile in tiles:
+    for tile in tile_list:
         parse_tile(tile)
-    for path in dem_paths:
+    for path in dem_list:
         if not path.exists() and not dry_run:
             raise ValueError(f"DEM not found: {path}")
     if not options.get("normalize", True):
-        if options.get("dem_stack_path"):
-            raise ValueError("Skipping normalization is not supported with DEM stacks.")
-        if len(list(dem_paths)) != 1:
-            raise ValueError("Skipping normalization requires exactly one DEM path.")
+        tile_dem_paths = options.get("tile_dem_paths") or {}
+        tile_dem_complete = bool(tile_dem_paths) and all(
+            tile in tile_dem_paths for tile in tile_list
+        )
+        if not tile_dem_complete:
+            if options.get("dem_stack_path"):
+                raise ValueError(
+                    "Skipping normalization is not supported with DEM stacks."
+                )
+            if len(dem_list) != 1:
+                raise ValueError(
+                    "Skipping normalization requires exactly one DEM path."
+                )
     coverage_min = options.get("coverage_min")
     if coverage_min is not None:
         if not 0.0 <= float(coverage_min) <= 1.0:
@@ -322,7 +333,7 @@ def _apply_xp12_checks(
 ) -> None:
     """Inventory XP12 rasters in DSFs and record warnings/errors."""
     quality = options.get("quality", "compat")
-    dsftool_path = _resolve_tool_path(options.get("dsftool"))
+    dsftool_cmd = _resolve_tool_command(options.get("dsftool"))
     global_scenery = options.get("global_scenery")
     global_root = Path(global_scenery) if global_scenery else None
     dsftool_kwargs = _dsftool_kwargs(options)
@@ -336,7 +347,7 @@ def _apply_xp12_checks(
             _ensure_messages(tile_entry).append("DSF output not found; XP12 raster check skipped.")
             _mark_warning(tile_entry)
             continue
-        if not dsftool_path:
+        if not dsftool_cmd:
             message = "DSFTool not configured; XP12 raster check skipped."
             _ensure_messages(tile_entry).append(message)
             if quality == "xp12-enhanced":
@@ -349,7 +360,7 @@ def _apply_xp12_checks(
 
         try:
             summary = inventory_dsf_rasters(
-                dsftool_path,
+                dsftool_cmd,
                 dsf_path,
                 output_dir / "xp12" / tile,
                 **dsftool_kwargs,
@@ -397,12 +408,12 @@ def _apply_xp12_enrichment(
     if not options.get("enrich_xp12"):
         return
 
-    dsftool_path = _resolve_tool_path(options.get("dsftool"))
+    dsftool_cmd = _resolve_tool_command(options.get("dsftool"))
     global_scenery = options.get("global_scenery")
     global_root = Path(global_scenery) if global_scenery else None
     dsftool_kwargs = _dsftool_kwargs(options)
 
-    if not dsftool_path or not global_root:
+    if not dsftool_cmd or not global_root:
         message = "XP12 enrichment requires --dsftool and --global-scenery."
         for tile_entry in report.get("tiles", []):
             _ensure_messages(tile_entry).append(message)
@@ -429,7 +440,7 @@ def _apply_xp12_enrichment(
             continue
 
         result = enrich_dsf_rasters(
-            dsftool_path,
+            dsftool_cmd,
             dsf_path,
             global_dsf,
             output_dir / "xp12" / tile / "enrich",
@@ -459,7 +470,7 @@ def _apply_xp12_enrichment(
             _ensure_messages(tile_entry).append(f"XP12 rasters enriched: {', '.join(result.added)}")
             try:
                 summary = inventory_dsf_rasters(
-                    dsftool_path,
+                    dsftool_cmd,
                     dsf_path,
                     output_dir / "xp12" / tile / "post",
                     **dsftool_kwargs,
@@ -517,9 +528,9 @@ def _apply_dsf_validation(
     output_dir: Path,
 ) -> None:
     """Validate DSF structure and geographic bounds."""
-    dsftool_path = _resolve_tool_path(options.get("dsftool"))
+    dsftool_cmd = _resolve_tool_command(options.get("dsftool"))
     dsftool_kwargs = _dsftool_kwargs(options)
-    if not dsftool_path:
+    if not dsftool_cmd:
         message = "DSFTool not configured; DSF validation skipped."
         for tile_entry in report.get("tiles", []):
             _ensure_messages(tile_entry).append(message)
@@ -548,7 +559,7 @@ def _apply_dsf_validation(
         }
         try:
             roundtrip_dsf(
-                dsftool_path,
+                dsftool_cmd,
                 dsf_path,
                 work_dir,
                 **dsftool_kwargs,

@@ -94,10 +94,9 @@ class Ortho4XPBackend:
         if dem_path is None:
             errors.append("No DEM paths provided.")
 
-        if len(request.dem_paths) > 1:
+        tile_dem_paths = options.get("tile_dem_paths") or {}
+        if len(request.dem_paths) > 1 and not tile_dem_paths:
             warnings.append("Multiple DEMs provided; using the first for all tiles.")
-
-        tile_dem_paths = options.get("tile_dem_paths", {})
         normalization_errors = options.get("normalization_errors") or {}
         runner_timeout = options.get("runner_timeout")
         runner_retries = int(options.get("runner_retries", 0) or 0)
@@ -164,7 +163,11 @@ class Ortho4XPBackend:
             else:
                 status = "warning" if status == "ok" else status
                 messages.append("DSF output not found")
-            tile_statuses.append({"tile": tile, "status": status, "messages": messages})
+            tile_entry = {"tile": tile, "status": status, "messages": messages}
+            staged_dem = _read_stage_metadata(request.output_dir, tile)
+            if staged_dem:
+                tile_entry["metrics"] = {"staged_dem": staged_dem}
+            tile_statuses.append(tile_entry)
 
         report = build_report(
             backend=self.spec(),
@@ -194,6 +197,20 @@ def _runner_log_paths(output_dir: Path, tile: str, attempt: int) -> tuple[Path, 
     stdout_path = log_dir / f"backend_{tile}{suffix}.stdout.log"
     stderr_path = log_dir / f"backend_{tile}{suffix}.stderr.log"
     return stdout_path, stderr_path
+
+
+def _read_stage_metadata(output_dir: Path, tile: str) -> str | None:
+    path = output_dir / "runner_logs" / f"ortho4xp_{tile}.staged.json"
+    if not path.exists():
+        return None
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return None
+    staged = payload.get("staged_dem")
+    if isinstance(staged, str) and staged:
+        return staged
+    return None
 
 
 def _run_runner(

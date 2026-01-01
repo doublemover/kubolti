@@ -140,6 +140,15 @@ def _write_logs(
     )
 
 
+def _write_stage_metadata(output_dir: Path, tile: str, staged_path: Path) -> None:
+    log_dir = output_dir / "runner_logs"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    payload = {"staged_dem": str(staged_path)}
+    (log_dir / f"ortho4xp_{tile}.staged.json").write_text(
+        json.dumps(payload, indent=2), encoding="utf-8"
+    )
+
+
 STEP_PATTERN = re.compile(r"\bStep\s+(\d+(?:\.\d+)?)\b", re.IGNORECASE)
 TRIANGLE_FAILURE_PATTERN = re.compile(
     r"(triangle4xp|minimum allowable angle|tiny triangles|area criterion)",
@@ -187,8 +196,8 @@ def parse_runner_events(stdout: str, stderr: str) -> list[dict[str, str]]:
 
 def _runner_env() -> dict[str, str]:
     env = dict(os.environ)
-    source_root = Path(__file__).resolve().parents[1] / "src"
-    if source_root.exists():
+    source_root = Path(__file__).resolve().parents[3] / "src"
+    if (source_root / "dem2dsf").exists():
         existing = env.get("PYTHONPATH", "")
         entries = [entry for entry in existing.split(os.pathsep) if entry]
         source_str = str(source_root)
@@ -358,7 +367,8 @@ def main() -> int:
         config_updates["skip_downloads"] = True
 
     if not args.skip_dem_stage:
-        stage_custom_dem(ortho_root, args.tile, dem_path)
+        staged_path = stage_custom_dem(ortho_root, args.tile, dem_path)
+        _write_stage_metadata(output_dir, args.tile, staged_path)
 
     extra_args = list(args.ortho_args or [])
     if args.batch:

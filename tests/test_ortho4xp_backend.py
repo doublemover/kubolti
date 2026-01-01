@@ -233,6 +233,33 @@ def test_ortho4xp_backend_multiple_dems(tmp_path) -> None:
     assert any("Multiple DEMs provided" in warning for warning in result.build_report["warnings"])
 
 
+def test_ortho4xp_backend_multi_dems_with_tile_paths_no_warning(tmp_path) -> None:
+    runner = tmp_path / "runner.py"
+    runner.write_text("import sys\nsys.exit(0)\n", encoding="utf-8")
+    dem_a = tmp_path / "a.tif"
+    dem_b = tmp_path / "b.tif"
+    tile_dem = tmp_path / "tile.tif"
+    for path in (dem_a, dem_b, tile_dem):
+        path.write_text("dem", encoding="utf-8")
+
+    request = BuildRequest(
+        tiles=("+47+008",),
+        dem_paths=(dem_a, dem_b),
+        output_dir=tmp_path,
+        options={
+            "runner": [sys.executable, str(runner)],
+            "tile_dem_paths": {"+47+008": str(tile_dem)},
+        },
+    )
+    backend = Ortho4XPBackend()
+    result = backend.build(request)
+
+    assert not any(
+        "Multiple DEMs provided" in warning
+        for warning in result.build_report["warnings"]
+    )
+
+
 def test_ortho4xp_backend_invalid_density(tmp_path) -> None:
     runner = tmp_path / "runner.py"
     runner.write_text("import sys\nsys.exit(0)\n", encoding="utf-8")

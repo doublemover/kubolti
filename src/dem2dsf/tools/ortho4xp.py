@@ -116,6 +116,12 @@ def stage_custom_dem(root: Path, tile: str, dem_path: Path) -> Path:
     """Copy a tile DEM into Ortho4XP's Elevation_data folder."""
     destination = elevation_data_path(root, tile, dem_path.suffix)
     destination.parent.mkdir(parents=True, exist_ok=True)
+    stem = hgt_tile_name(tile)
+    for candidate in destination.parent.glob(f"{stem}.*"):
+        if candidate == destination:
+            continue
+        if candidate.is_file():
+            candidate.unlink()
     shutil.copy(dem_path, destination)
     return destination
 

@@ -40,9 +40,26 @@ def test_normalize_command_variants() -> None:
         build._normalize_command(123)
 
 
-def test_resolve_tool_path() -> None:
-    assert build._resolve_tool_path(None) is None
-    assert build._resolve_tool_path(["/tmp/tool"]) == Path("/tmp/tool")
+def test_resolve_tool_command() -> None:
+    assert build._resolve_tool_command(None) is None
+    assert build._resolve_tool_command(["/tmp/tool"]) == ["/tmp/tool"]
+
+
+def test_validate_build_inputs_allows_tile_dem_paths(tmp_path: Path) -> None:
+    tile = "+47+008"
+    tile_path = tmp_path / "tile.tif"
+    tile_path.write_text("dem", encoding="utf-8")
+
+    build._validate_build_inputs(
+        tiles=[tile],
+        dem_paths=[tmp_path / "a.tif", tmp_path / "b.tif"],
+        options={
+            "normalize": False,
+            "tile_dem_paths": {tile: str(tile_path)},
+            "dem_stack_path": str(tmp_path / "stack.json"),
+            "dry_run": True,
+        },
+    )
 
 
 def test_message_and_metric_helpers() -> None:
@@ -387,6 +404,43 @@ def test_apply_dsf_validation_missing_dsf(tmp_path: Path) -> None:
     build._apply_dsf_validation(report, {"dsftool": ["tool"]}, tmp_path)
 
     assert report["tiles"][0]["status"] == "warning"
+
+
+def test_apply_dsf_validation_preserves_dsftool_command(
+    monkeypatch, tmp_path: Path
+) -> None:
+    output_dir = tmp_path / "out"
+    dsf_path = xplane_dsf_path(output_dir, "+47+008")
+    dsf_path.parent.mkdir(parents=True, exist_ok=True)
+    dsf_path.write_text("dsf", encoding="utf-8")
+
+    captured = {}
+
+    def fake_roundtrip(tool_cmd, *_args, **_kwargs):
+        captured["cmd"] = tool_cmd
+
+    monkeypatch.setattr(build, "roundtrip_dsf", fake_roundtrip)
+    monkeypatch.setattr(
+        build,
+        "parse_properties_from_file",
+        lambda *_: {
+            "sim/west": "8",
+            "sim/south": "47",
+            "sim/east": "9",
+            "sim/north": "48",
+        },
+    )
+    monkeypatch.setattr(
+        build, "parse_bounds", lambda *_: build.expected_bounds_for_tile("+47+008")
+    )
+    monkeypatch.setattr(build, "compare_bounds", lambda *_: [])
+
+    report = {"tiles": [{"tile": "+47+008", "status": "ok"}]}
+    build._apply_dsf_validation(
+        report, {"dsftool": ["wine", "DSFTool.exe"]}, output_dir
+    )
+
+    assert captured["cmd"] == ["wine", "DSFTool.exe"]
 
 
 def test_apply_dsf_validation_roundtrip_error(monkeypatch, tmp_path: Path) -> None:
