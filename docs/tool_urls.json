@@ -1,0 +1,54 @@
+{
+  "fetched_at": "2026-01-01T02:16:38.638540+00:00",
+  "source_pages": {
+    "xptools": "https://developer.x-plane.com/tools/xptools/",
+    "tools_index": "https://developer.x-plane.com/tools/"
+  },
+  "xptools": {
+    "latest": {
+      "win": "https://files.x-plane.com/public/xptools/xptools_win_24-5.zip",
+      "mac": "https://files.x-plane.com/public/xptools/xptools_mac_24-5.zip",
+      "lin": "https://files.x-plane.com/public/xptools/xptools_lin_24-5.zip"
+    },
+    "all": [
+      "https://files.x-plane.com/public/xptools/xptools_win_24-5.zip",
+      "https://files.x-plane.com/public/xptools/xptools_mac_24-5.zip",
+      "https://files.x-plane.com/public/xptools/xptools_lin_24-5.zip",
+      "https://files.x-plane.com/public/xptools/xptools_win_23-4.zip",
+      "https://files.x-plane.com/public/xptools/xptools_mac_23-4.zip",
+      "https://files.x-plane.com/public/xptools/xptools_lin_23-4.zip",
+      "http://dev.x-plane.com/download/tools/xptools_win_15-3.zip",
+      "http://dev.x-plane.com/download/tools/xptools_mac_15-3.zip",
+      "http://dev.x-plane.com/download/tools/xptools_lin_15-3.zip",
+      "http://dev.x-plane.com/download/tools/xptools_win_12-2.zip",
+      "http://dev.x-plane.com/download/tools/xptools_mac_12-2.zip",
+      "http://dev.x-plane.com/download/tools/xptools_lin_12-2.zip"
+    ]
+  },
+  "tools_index": [
+    {
+      "name": "blender",
+      "url": "https://developer.x-plane.com/tools/blender/"
+    },
+    {
+      "name": "datarefeditor",
+      "url": "https://developer.x-plane.com/tools/datarefeditor/"
+    },
+    {
+      "name": "meshtool",
+      "url": "https://developer.x-plane.com/tools/meshtool/"
+    },
+    {
+      "name": "substance painter",
+      "url": "https://developer.x-plane.com/tools/substance-painter/"
+    },
+    {
+      "name": "worldeditor",
+      "url": "https://developer.x-plane.com/tools/worldeditor/"
+    },
+    {
+      "name": "xptools",
+      "url": "https://developer.x-plane.com/tools/xptools/"
+    }
+  ]
+}

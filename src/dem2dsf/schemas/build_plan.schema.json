@@ -1,0 +1,63 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://dem2dsf.local/schemas/build_plan.schema.json",
+  "title": "DEM2DSF Build Plan",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "created_at", "inputs", "tiles", "backend", "options"],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "pattern": "^1\\.\\d+$"
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "inputs": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["dems"],
+      "properties": {
+        "dems": {
+          "type": "array",
+          "minItems": 1,
+          "items": {"type": "string", "minLength": 1}
+        },
+        "aoi": {
+          "type": ["string", "null"]
+        }
+      }
+    },
+    "tiles": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^[+-]\\d{2}[+-]\\d{3}$"
+      }
+    },
+    "backend": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version"],
+      "properties": {
+        "name": {"type": "string", "minLength": 1},
+        "version": {"type": "string", "minLength": 1},
+        "profile": {"type": "string"}
+      }
+    },
+    "options": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "quality": {"type": "string"},
+        "autoortho": {"type": "boolean"},
+        "density": {"type": "string"}
+      }
+    },
+    "notes": {
+      "type": "array",
+      "items": {"type": "string"}
+    }
+  }
+}

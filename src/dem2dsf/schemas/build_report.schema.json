@@ -1,0 +1,113 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://dem2dsf.local/schemas/build_report.schema.json",
+  "title": "DEM2DSF Build Report",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "created_at",
+    "backend",
+    "tiles",
+    "artifacts",
+    "warnings",
+    "errors"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "pattern": "^1\\.\\d+$"
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "backend": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version"],
+      "properties": {
+        "name": {"type": "string", "minLength": 1},
+        "version": {"type": "string", "minLength": 1}
+      }
+    },
+    "tiles": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["tile", "status"],
+        "properties": {
+          "tile": {
+            "type": "string",
+            "pattern": "^[+-]\\d{2}[+-]\\d{3}$"
+          },
+          "status": {
+            "type": "string",
+            "enum": ["ok", "warning", "error", "skipped"]
+          },
+          "messages": {
+            "type": "array",
+            "items": {"type": "string"}
+          },
+          "metrics": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        }
+      }
+    },
+    "artifacts": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "scenery_dir": {"type": "string"},
+        "dsf_paths": {
+          "type": "array",
+          "items": {"type": "string"}
+        }
+      }
+    },
+    "performance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["total_seconds", "spans", "events"],
+      "properties": {
+        "total_seconds": {"type": "number", "minimum": 0},
+        "spans": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["seconds", "count"],
+            "properties": {
+              "seconds": {"type": "number", "minimum": 0},
+              "count": {"type": "integer", "minimum": 0}
+            }
+          }
+        },
+        "events": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name", "seconds"],
+            "properties": {
+              "name": {"type": "string", "minLength": 1},
+              "seconds": {"type": "number", "minimum": 0}
+            }
+          }
+        },
+        "peak_memory_mb": {"type": "number", "minimum": 0}
+      }
+    },
+    "warnings": {
+      "type": "array",
+      "items": {"type": "string"}
+    },
+    "errors": {
+      "type": "array",
+      "items": {"type": "string"}
+    }
+  }
+}

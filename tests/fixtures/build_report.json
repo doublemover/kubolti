@@ -1,0 +1,21 @@
+{
+  "schema_version": "1.0",
+  "created_at": "2025-12-27T00:00:00Z",
+  "backend": {
+    "name": "ortho4xp",
+    "version": "1.40"
+  },
+  "tiles": [
+    {
+      "tile": "+47+008",
+      "status": "ok",
+      "messages": []
+    }
+  ],
+  "artifacts": {
+    "scenery_dir": "build/scenery",
+    "dsf_paths": ["Earth nav data/+40+000/+47+008.dsf"]
+  },
+  "warnings": [],
+  "errors": []
+}

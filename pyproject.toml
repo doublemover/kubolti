@@ -1,0 +1,52 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "dem2dsf"
+version = "0.1.0"
+description = "DEM2DSF XP12 mesh pipeline"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+  "jsonschema>=4.20.0",
+  "numpy>=1.26.0",
+  "pyproj>=3.7.0",
+  "rasterio>=1.4.0",
+]
+
+[project.optional-dependencies]
+dev = [
+  "build>=1.2.0",
+  "pytest>=7.4.0",
+  "pytest-cov>=5.0.0",
+  "ruff>=0.6.0",
+]
+
+[project.scripts]
+dem2dsf = "dem2dsf.cli:main"
+dem2dsf-ortho4xp = "dem2dsf.runners.ortho4xp:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+dem2dsf = ["schemas/*.json"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+  "e2e: end-to-end CLI tests",
+  "integration: integration tests requiring external tools",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+exclude = ["tools"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I"]
