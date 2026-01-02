@@ -41,7 +41,9 @@ class Backend(Protocol):
     """Protocol implemented by backend adapters."""
 
     def spec(self) -> BackendSpec:
+        """Return backend metadata and capability flags."""
         ...
 
     def build(self, request: BuildRequest) -> BuildResult:
+        """Run the backend build and return plan/report data."""
         ...

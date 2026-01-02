@@ -52,6 +52,7 @@ def _collect_links(url: str) -> list[str]:
     parser.feed(_fetch_html(url))
     return [urljoin(url, link) for link in parser.links]
 
+
 def _parse_xptools_links(links: Iterable[str]) -> list[DownloadCandidate]:
     candidates: list[DownloadCandidate] = []
     pattern = re.compile(r"xptools_(win|mac|lin)_([\d-]+)\.zip", re.IGNORECASE)
@@ -62,9 +63,7 @@ def _parse_xptools_links(links: Iterable[str]) -> list[DownloadCandidate]:
         platform = match.group(1).lower()
         version_raw = match.group(2)
         version_key = tuple(int(part) for part in version_raw.split("-") if part.isdigit())
-        candidates.append(
-            DownloadCandidate(url=link, platform=platform, version_key=version_key)
-        )
+        candidates.append(DownloadCandidate(url=link, platform=platform, version_key=version_key))
     return candidates
 
 

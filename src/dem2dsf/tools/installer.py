@@ -3,8 +3,13 @@
 from __future__ import annotations
 
 import json
+import os
+import platform
 import shutil
+import stat
+import struct
 import subprocess
+import sys
 import tarfile
 import zipfile
 from dataclasses import dataclass
@@ -87,6 +92,85 @@ def extract_archive(archive_path: Path, destination: Path) -> list[Path]:
     return sorted(extracted_roots)
 
 
+_MACHO_MAGICS = {
+    b"\xFE\xED\xFA\xCE",
+    b"\xCE\xFA\xED\xFE",
+    b"\xFE\xED\xFA\xCF",
+    b"\xCF\xFA\xED\xFE",
+}
+_FAT_MAGICS = {b"\xCA\xFE\xBA\xBE", b"\xBE\xBA\xFE\xCA"}
+_CPU_TYPE_X86 = 7
+_CPU_TYPE_ARM = 12
+_CPU_ARCH_ABI64 = 0x01000000
+_CPU_TYPE_X86_64 = _CPU_TYPE_X86 | _CPU_ARCH_ABI64
+_CPU_TYPE_ARM64 = _CPU_TYPE_ARM | _CPU_ARCH_ABI64
+
+
+def _darwin_cpu_matches(cputype: int) -> bool:
+    machine = platform.machine().lower()
+    if machine in {"arm64", "aarch64"}:
+        return cputype == _CPU_TYPE_ARM64
+    if machine in {"x86_64", "amd64"}:
+        return cputype == _CPU_TYPE_X86_64
+    return True
+
+
+def _darwin_is_compatible_macho(path: Path) -> bool:
+    try:
+        with path.open("rb") as handle:
+            header = handle.read(8)
+            if len(header) < 8:
+                return False
+            magic = header[:4]
+            if magic in _FAT_MAGICS:
+                endian = ">" if magic == b"\xCA\xFE\xBA\xBE" else "<"
+                nfat_arch = struct.unpack(f"{endian}I", header[4:8])[0]
+                table_size = 8 + nfat_arch * 20
+                data = header + handle.read(max(0, table_size - len(header)))
+                if len(data) < table_size:
+                    return False
+                offset = 8
+                for _ in range(nfat_arch):
+                    cputype = struct.unpack(f"{endian}I", data[offset : offset + 4])[0]
+                    if _darwin_cpu_matches(cputype):
+                        return True
+                    offset += 20
+                return False
+            if magic in _MACHO_MAGICS:
+                cputype_le = struct.unpack("<I", header[4:8])[0]
+                cputype_be = struct.unpack(">I", header[4:8])[0]
+                return _darwin_cpu_matches(cputype_le) or _darwin_cpu_matches(cputype_be)
+            return False
+    except OSError:
+        return False
+
+
+def is_executable_file(path: Path) -> bool:
+    """Return True if the path looks like a runnable tool binary/script."""
+    if not path.is_file():
+        return False
+    if os.name == "nt":
+        return path.suffix.lower() in {".exe", ".bat", ".cmd"}
+    try:
+        with path.open("rb") as handle:
+            header = handle.read(8)
+    except OSError:
+        return False
+    if header.startswith(b"#!"):
+        return True
+    if sys.platform == "darwin":
+        return _darwin_is_compatible_macho(path)
+    return header[:4] == b"\x7fELF"
+
+
+def ensure_executable(path: Path) -> None:
+    """Mark a tool binary as executable on POSIX systems."""
+    if os.name == "nt":
+        return
+    mode = path.stat().st_mode
+    path.chmod(mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+
+
 def _find_executable(names: Iterable[str], search_dirs: Iterable[Path]) -> Path | None:
     """Search PATH and directories for an executable."""
     for name in names:
@@ -96,7 +180,7 @@ def _find_executable(names: Iterable[str], search_dirs: Iterable[Path]) -> Path 
     for root in search_dirs:
         for name in names:
             candidate = root / name
-            if candidate.exists():
+            if is_executable_file(candidate):
                 return candidate
     return None
 
@@ -105,17 +189,41 @@ def _find_in_tree(root: Path, names: Iterable[str]) -> Path | None:
     """Search a directory tree for matching file names."""
     for name in names:
         for candidate in root.rglob(name):
-            if candidate.is_file():
+            if is_executable_file(candidate):
                 return candidate
     return None
 
 
 def find_dsftool(search_dirs: Iterable[Path]) -> Path | None:
     """Locate DSFTool in PATH or search directories."""
-    return _find_executable(
-        ("DSFTool.exe", "DSFTool", "dsftool"),
-        search_dirs,
-    )
+    if os.name == "nt":
+        names = ("DSFTool.exe", "DSFTool", "dsftool")
+    else:
+        names = ("DSFTool", "dsftool")
+    found = _find_executable(names, search_dirs)
+    if found:
+        return found
+    for root in search_dirs:
+        found = _find_in_tree(root, names)
+        if found:
+            return found
+    return None
+
+
+def find_ddstool(search_dirs: Iterable[Path]) -> Path | None:
+    """Locate DDSTool in PATH or search directories."""
+    if os.name == "nt":
+        names = ("DDSTool.exe", "DDSTool", "ddstool")
+    else:
+        names = ("DDSTool", "ddstool")
+    found = _find_executable(names, search_dirs)
+    if found:
+        return found
+    for root in search_dirs:
+        found = _find_in_tree(root, names)
+        if found:
+            return found
+    return None
 
 
 def find_ortho4xp(search_dirs: Iterable[Path]) -> Path | None:
@@ -159,6 +267,7 @@ def install_from_archive(
     for root in roots or [destination]:
         found = _find_in_tree(root, executable_names)
         if found:
+            ensure_executable(found)
             return found
     raise FileNotFoundError(
         f"Executable not found after extracting {archive} into {destination}"

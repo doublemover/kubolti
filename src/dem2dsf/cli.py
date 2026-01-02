@@ -12,6 +12,9 @@ from pathlib import Path
 
 from dem2dsf import __version__
 from dem2dsf.build import run_build
+from dem2dsf.build_config import load_build_config
+from dem2dsf.clean import clean_build, format_clean_summary, supported_clean_targets
+from dem2dsf.dem.stack import load_dem_stack
 from dem2dsf.density import DENSITY_PRESETS
 from dem2dsf.doctor import run_doctor
 from dem2dsf.logging_utils import LogOptions, configure_logging
@@ -30,6 +33,7 @@ from dem2dsf.presets import (
 )
 from dem2dsf.publish import find_sevenzip, publish_build
 from dem2dsf.scenery import scan_custom_scenery
+from dem2dsf.tile_inference import infer_tiles
 from dem2dsf.tools.config import load_tool_paths, ortho_root_from_paths
 from dem2dsf.tools.ortho4xp import (
     CACHE_CATEGORIES,
@@ -51,8 +55,16 @@ class BuildOptions:
     autoortho: bool
     runner: list[str] | None
     dsftool: list[str] | None
+    ddstool: list[str] | None
+    dsf_validation: str
+    dsf_validation_workers: int | None
+    validate_all: bool
+    dds_validation: str
+    dds_strict: bool
     global_scenery: str | None
     enrich_xp12: bool
+    xp12_strict: bool
+    autoortho_texture_strict: bool
     target_crs: str | None
     target_resolution: float | None
     resampling: str
@@ -70,6 +82,8 @@ class BuildOptions:
     coverage_hard_fail: bool
     coverage_metrics: bool
     mosaic_strategy: str
+    normalized_compression: str | None
+    cache_sha256: bool
     runner_timeout: float | None
     runner_retries: int
     runner_stream_logs: bool
@@ -77,19 +91,35 @@ class BuildOptions:
     dsftool_retries: int
     bundle_diagnostics: bool
     dry_run: bool
+    resume: str | None
     dem_stack_path: str | None
+    aoi: str | None
+    aoi_crs: str | None
+    infer_tiles: bool
     profile: bool
     metrics_json: str | None
+    provenance_level: str
+    stable_metadata: bool
+    pinned_versions_path: str | None
 
     def as_dict(self) -> dict[str, object]:
+        """Return options as a JSON-serializable mapping."""
         return {
             "quality": self.quality,
             "autoortho": self.autoortho,
             "density": self.density,
             "runner": self.runner,
             "dsftool": self.dsftool,
+            "ddstool": self.ddstool,
+            "dsf_validation": self.dsf_validation,
+            "dsf_validation_workers": self.dsf_validation_workers,
+            "validate_all": self.validate_all,
+            "dds_validation": self.dds_validation,
+            "dds_strict": self.dds_strict,
             "global_scenery": self.global_scenery,
             "enrich_xp12": self.enrich_xp12,
+            "xp12_strict": self.xp12_strict,
+            "autoortho_texture_strict": self.autoortho_texture_strict,
             "target_crs": self.target_crs,
             "target_resolution": self.target_resolution,
             "resampling": self.resampling,
@@ -107,6 +137,8 @@ class BuildOptions:
             "coverage_hard_fail": self.coverage_hard_fail,
             "coverage_metrics": self.coverage_metrics,
             "mosaic_strategy": self.mosaic_strategy,
+            "normalized_compression": self.normalized_compression,
+            "cache_sha256": self.cache_sha256,
             "runner_timeout": self.runner_timeout,
             "runner_retries": self.runner_retries,
             "runner_stream_logs": self.runner_stream_logs,
@@ -114,9 +146,16 @@ class BuildOptions:
             "dsftool_retries": self.dsftool_retries,
             "bundle_diagnostics": self.bundle_diagnostics,
             "dry_run": self.dry_run,
+            "resume": self.resume,
             "dem_stack_path": self.dem_stack_path,
+            "aoi": self.aoi,
+            "aoi_crs": self.aoi_crs,
+            "infer_tiles": self.infer_tiles,
             "profile": self.profile,
             "metrics_json": self.metrics_json,
+            "provenance_level": self.provenance_level,
+            "stable_metadata": self.stable_metadata,
+            "pinned_versions_path": self.pinned_versions_path,
         }
 
 
@@ -131,14 +170,25 @@ def _build_options_from_args(
     resolved_autoortho = autoortho
     if resolved_autoortho is None:
         resolved_autoortho = bool(getattr(args, "autoortho", False))
+    tile_jobs_value = getattr(args, "tile_jobs", 1)
+    if tile_jobs_value is None:
+        tile_jobs_value = 1
     return BuildOptions(
         quality=args.quality,
         density=args.density,
         autoortho=resolved_autoortho,
         runner=runner if runner is not None else getattr(args, "runner", None),
         dsftool=getattr(args, "dsftool", None),
+        ddstool=getattr(args, "ddstool", None),
+        dsf_validation=getattr(args, "dsf_validation", "roundtrip"),
+        dsf_validation_workers=getattr(args, "dsf_validation_workers", None),
+        validate_all=bool(getattr(args, "validate_all", False)),
+        dds_validation=getattr(args, "dds_validation", "none"),
+        dds_strict=bool(getattr(args, "dds_strict", False)),
         global_scenery=getattr(args, "global_scenery", None),
         enrich_xp12=bool(getattr(args, "enrich_xp12", False)),
+        xp12_strict=bool(getattr(args, "xp12_strict", False)),
+        autoortho_texture_strict=bool(getattr(args, "autoortho_texture_strict", False)),
         target_crs=getattr(args, "target_crs", None),
         target_resolution=getattr(args, "target_resolution", None),
         resampling=args.resampling,
@@ -146,18 +196,18 @@ def _build_options_from_args(
         fill_strategy=args.fill_strategy,
         fill_value=float(getattr(args, "fill_value", 0.0) or 0.0),
         fallback_dem_paths=getattr(args, "fallback_dem", None),
-        tile_jobs=int(getattr(args, "tile_jobs", 1) or 1),
+        tile_jobs=int(tile_jobs_value),
         normalize=not bool(getattr(args, "skip_normalize", False)),
         triangle_warn=getattr(args, "warn_triangles", None),
         triangle_max=getattr(args, "max_triangles", None),
-        allow_triangle_overage=bool(
-            getattr(args, "allow_triangle_overage", False)
-        ),
+        allow_triangle_overage=bool(getattr(args, "allow_triangle_overage", False)),
         continue_on_error=bool(getattr(args, "continue_on_error", False)),
         coverage_min=getattr(args, "min_coverage", None),
         coverage_hard_fail=bool(getattr(args, "coverage_hard_fail", False)),
         coverage_metrics=not bool(getattr(args, "skip_coverage_metrics", False)),
         mosaic_strategy=getattr(args, "mosaic_strategy", "full"),
+        normalized_compression=getattr(args, "normalized_compression", None),
+        cache_sha256=bool(getattr(args, "cache_sha256", False)),
         runner_timeout=getattr(args, "runner_timeout", None),
         runner_retries=int(getattr(args, "runner_retries", 0) or 0),
         runner_stream_logs=bool(getattr(args, "runner_stream_logs", False)),
@@ -165,9 +215,16 @@ def _build_options_from_args(
         dsftool_retries=int(getattr(args, "dsftool_retries", 0) or 0),
         bundle_diagnostics=bool(getattr(args, "bundle_diagnostics", False)),
         dry_run=dry_run if dry_run is not None else bool(getattr(args, "dry_run", False)),
+        resume=getattr(args, "resume", None),
         dem_stack_path=getattr(args, "dem_stack", None),
+        aoi=getattr(args, "aoi", None),
+        aoi_crs=getattr(args, "aoi_crs", None),
+        infer_tiles=bool(getattr(args, "infer_tiles", False)),
         profile=bool(getattr(args, "profile", False)),
         metrics_json=getattr(args, "metrics_json", None),
+        provenance_level=getattr(args, "provenance_level", "basic"),
+        stable_metadata=bool(getattr(args, "stable_metadata", False)),
+        pinned_versions_path=getattr(args, "pinned_versions", None),
     )
 
 
@@ -180,6 +237,19 @@ def _add_build_parser(subparsers: argparse._SubParsersAction) -> None:
         help="Path to a JSON DEM stack definition.",
     )
     build.add_argument("--tile", action="append", help="Tile name like +DD+DDD.")
+    build.add_argument(
+        "--infer-tiles",
+        action="store_true",
+        help="Infer tiles from DEM/AOI bounds when --tile is omitted.",
+    )
+    build.add_argument(
+        "--aoi",
+        help="Optional AOI polygon (GeoJSON or SHP) to mask tiles.",
+    )
+    build.add_argument(
+        "--aoi-crs",
+        help="Override AOI CRS when none is embedded (preferred: EPSG:4326).",
+    )
     build.add_argument(
         "--quality",
         choices=("compat", "xp12-enhanced"),
@@ -198,6 +268,10 @@ def _add_build_parser(subparsers: argparse._SubParsersAction) -> None:
         help="Output directory for build artifacts.",
     )
     build.add_argument(
+        "--config",
+        help="Path to a JSON build config file.",
+    )
+    build.add_argument(
         "--runner",
         nargs="+",
         help="Command to invoke the Ortho4XP runner.",
@@ -208,6 +282,39 @@ def _add_build_parser(subparsers: argparse._SubParsersAction) -> None:
         help="Command to invoke DSFTool for DSF validation.",
     )
     build.add_argument(
+        "--dsf-validation",
+        choices=("none", "bounds", "roundtrip"),
+        default="roundtrip",
+        help="DSF validation mode (bounds parses properties; roundtrip runs dsf2text+text2dsf).",
+    )
+    build.add_argument(
+        "--dsf-validation-workers",
+        type=int,
+        default=None,
+        help="Parallel DSF validation workers (default: half of CPU cores).",
+    )
+    build.add_argument(
+        "--validate-all",
+        action="store_true",
+        help="Validate tiles even when they already have warnings/errors.",
+    )
+    build.add_argument(
+        "--ddstool",
+        nargs="+",
+        help="Command to invoke DDSTool for DDS validation.",
+    )
+    build.add_argument(
+        "--dds-validation",
+        choices=("none", "header", "ddstool"),
+        default="none",
+        help="DDS validation mode (header is fast; ddstool runs --info).",
+    )
+    build.add_argument(
+        "--dds-strict",
+        action="store_true",
+        help="Treat DDS validation failures as errors.",
+    )
+    build.add_argument(
         "--global-scenery",
         help="Path to a Global Scenery folder for XP12 raster checks.",
     )
@@ -215,6 +322,11 @@ def _add_build_parser(subparsers: argparse._SubParsersAction) -> None:
         "--enrich-xp12",
         action="store_true",
         help="Attempt to copy XP12 rasters from Global Scenery.",
+    )
+    build.add_argument(
+        "--xp12-strict",
+        action="store_true",
+        help="Treat missing XP12 rasters as errors.",
     )
     build.add_argument(
         "--target-crs",
@@ -261,13 +373,24 @@ def _add_build_parser(subparsers: argparse._SubParsersAction) -> None:
         "--jobs",
         type=int,
         default=1,
-        help="Parallel tile workers for normalization (default: 1).",
+        help="Parallel tile workers for normalization (0 = auto, default: 1).",
     )
     build.add_argument(
         "--mosaic-strategy",
-        choices=("full", "per-tile"),
+        choices=("full", "per-tile", "vrt"),
         default="full",
         help="Mosaic strategy for multiple DEMs (default: full).",
+    )
+    build.add_argument(
+        "--normalized-compression",
+        choices=("none", "lzw", "deflate"),
+        default="none",
+        help="Compression for normalized tiles (default: none).",
+    )
+    build.add_argument(
+        "--cache-sha256",
+        action="store_true",
+        help="Validate normalization cache with SHA-256 checksums.",
     )
     build.add_argument(
         "--continue-on-error",
@@ -342,7 +465,21 @@ def _add_build_parser(subparsers: argparse._SubParsersAction) -> None:
         help="Allow triangle estimates above the max threshold.",
     )
     build.add_argument("--dry-run", action="store_true", help="Write plan/report only.")
+    build.add_argument(
+        "--resume",
+        nargs="?",
+        const="build",
+        choices=("build", "validate-only"),
+        help=(
+            "Skip tiles already built (ok). Use 'validate-only' to rerun checks without rebuilding."
+        ),
+    )
     build.add_argument("--autoortho", action="store_true", help="Enable AutoOrtho mode.")
+    build.add_argument(
+        "--autoortho-texture-strict",
+        action="store_true",
+        help="Treat missing/invalid AutoOrtho textures as errors.",
+    )
     build.add_argument(
         "--profile",
         action="store_true",
@@ -357,6 +494,21 @@ def _add_build_parser(subparsers: argparse._SubParsersAction) -> None:
         action="store_true",
         help="Bundle diagnostics artifacts after the build completes.",
     )
+    build.add_argument(
+        "--provenance-level",
+        choices=("basic", "strict"),
+        default="basic",
+        help="Provenance detail level (default: basic).",
+    )
+    build.add_argument(
+        "--stable-metadata",
+        action="store_true",
+        help="Omit volatile metadata fields like created_at from plan/report.",
+    )
+    build.add_argument(
+        "--pinned-versions",
+        help="Override pinned versions config (defaults to package or DEM2DSF_PINNED_VERSIONS).",
+    )
 
 
 def _add_wizard_parser(subparsers: argparse._SubParsersAction) -> None:
@@ -368,6 +520,19 @@ def _add_wizard_parser(subparsers: argparse._SubParsersAction) -> None:
         help="Path to a JSON DEM stack definition.",
     )
     wizard.add_argument("--tile", action="append", help="Tile name like +DD+DDD.")
+    wizard.add_argument(
+        "--infer-tiles",
+        action="store_true",
+        help="Infer tiles from DEM/AOI bounds when --tile is omitted.",
+    )
+    wizard.add_argument(
+        "--aoi",
+        help="Optional AOI polygon (GeoJSON or SHP) to mask tiles.",
+    )
+    wizard.add_argument(
+        "--aoi-crs",
+        help="Override AOI CRS when none is embedded (preferred: EPSG:4326).",
+    )
     wizard.add_argument(
         "--quality",
         choices=("compat", "xp12-enhanced"),
@@ -396,6 +561,39 @@ def _add_wizard_parser(subparsers: argparse._SubParsersAction) -> None:
         help="Command to invoke DSFTool for DSF validation.",
     )
     wizard.add_argument(
+        "--dsf-validation",
+        choices=("none", "bounds", "roundtrip"),
+        default="roundtrip",
+        help="DSF validation mode (bounds parses properties; roundtrip runs dsf2text+text2dsf).",
+    )
+    wizard.add_argument(
+        "--dsf-validation-workers",
+        type=int,
+        default=None,
+        help="Parallel DSF validation workers (default: half of CPU cores).",
+    )
+    wizard.add_argument(
+        "--validate-all",
+        action="store_true",
+        help="Validate tiles even when they already have warnings/errors.",
+    )
+    wizard.add_argument(
+        "--ddstool",
+        nargs="+",
+        help="Command to invoke DDSTool for DDS validation.",
+    )
+    wizard.add_argument(
+        "--dds-validation",
+        choices=("none", "header", "ddstool"),
+        default="none",
+        help="DDS validation mode (header is fast; ddstool runs --info).",
+    )
+    wizard.add_argument(
+        "--dds-strict",
+        action="store_true",
+        help="Treat DDS validation failures as errors.",
+    )
+    wizard.add_argument(
         "--global-scenery",
         help="Path to a Global Scenery folder for XP12 raster checks.",
     )
@@ -403,6 +601,16 @@ def _add_wizard_parser(subparsers: argparse._SubParsersAction) -> None:
         "--enrich-xp12",
         action="store_true",
         help="Attempt to copy XP12 rasters from Global Scenery.",
+    )
+    wizard.add_argument(
+        "--xp12-strict",
+        action="store_true",
+        help="Treat missing XP12 rasters as errors.",
+    )
+    wizard.add_argument(
+        "--autoortho-texture-strict",
+        action="store_true",
+        help="Treat missing/invalid AutoOrtho textures as errors.",
     )
     wizard.add_argument(
         "--target-crs",
@@ -449,13 +657,24 @@ def _add_wizard_parser(subparsers: argparse._SubParsersAction) -> None:
         "--jobs",
         type=int,
         default=1,
-        help="Parallel tile workers for normalization (default: 1).",
+        help="Parallel tile workers for normalization (0 = auto, default: 1).",
     )
     wizard.add_argument(
         "--mosaic-strategy",
-        choices=("full", "per-tile"),
+        choices=("full", "per-tile", "vrt"),
         default="full",
         help="Mosaic strategy for multiple DEMs (default: full).",
+    )
+    wizard.add_argument(
+        "--normalized-compression",
+        choices=("none", "lzw", "deflate"),
+        default="none",
+        help="Compression for normalized tiles (default: none).",
+    )
+    wizard.add_argument(
+        "--cache-sha256",
+        action="store_true",
+        help="Validate normalization cache with SHA-256 checksums.",
     )
     wizard.add_argument(
         "--continue-on-error",
@@ -546,13 +765,46 @@ def _add_wizard_parser(subparsers: argparse._SubParsersAction) -> None:
         action="store_true",
         help="Bundle diagnostics artifacts after the build completes.",
     )
+    wizard.add_argument(
+        "--provenance-level",
+        choices=("basic", "strict"),
+        default="basic",
+        help="Provenance detail level (default: basic).",
+    )
+    wizard.add_argument(
+        "--stable-metadata",
+        action="store_true",
+        help="Omit volatile metadata fields like created_at from plan/report.",
+    )
+    wizard.add_argument(
+        "--pinned-versions",
+        help="Override pinned versions config (defaults to package or DEM2DSF_PINNED_VERSIONS).",
+    )
+
+
+def _add_tiles_parser(subparsers: argparse._SubParsersAction) -> None:
+    """Register the tile inference subcommand."""
+    tiles = subparsers.add_parser("tiles", help="Infer tiles from DEM/AOI bounds.")
+    tiles.add_argument("--dem", action="append", help="Path to a DEM input file.")
+    tiles.add_argument(
+        "--dem-stack",
+        help="Path to a JSON DEM stack definition.",
+    )
+    tiles.add_argument("--aoi", help="Optional AOI polygon (GeoJSON or SHP).")
+    tiles.add_argument(
+        "--aoi-crs",
+        help="Override AOI CRS when none is embedded (preferred: EPSG:4326).",
+    )
+    tiles.add_argument(
+        "--json",
+        action="store_true",
+        help="Emit JSON output with bounds and coverage estimates.",
+    )
 
 
 def _add_doctor_parser(subparsers: argparse._SubParsersAction) -> None:
     """Register the doctor subcommand."""
-    doctor = subparsers.add_parser(
-        "doctor", help="Check external dependencies and environment."
-    )
+    doctor = subparsers.add_parser("doctor", help="Check external dependencies and environment.")
     doctor.add_argument(
         "--runner",
         nargs="+",
@@ -563,13 +815,16 @@ def _add_doctor_parser(subparsers: argparse._SubParsersAction) -> None:
         nargs="+",
         help="Command used to invoke DSFTool.",
     )
+    doctor.add_argument(
+        "--ddstool",
+        nargs="+",
+        help="Command used to invoke DDSTool.",
+    )
 
 
 def _add_autoortho_parser(subparsers: argparse._SubParsersAction) -> None:
     """Register the AutoOrtho preset subcommand."""
-    auto = subparsers.add_parser(
-        "autoortho", help="AutoOrtho preset build mode (Ortho4XP runner)."
-    )
+    auto = subparsers.add_parser("autoortho", help="AutoOrtho preset build mode (Ortho4XP runner).")
     auto.add_argument("--dem", action="append", help="Path to a DEM input file.")
     auto.add_argument(
         "--dem-stack",
@@ -642,13 +897,24 @@ def _add_autoortho_parser(subparsers: argparse._SubParsersAction) -> None:
         "--jobs",
         type=int,
         default=1,
-        help="Parallel tile workers for normalization (default: 1).",
+        help="Parallel tile workers for normalization (0 = auto, default: 1).",
     )
     auto.add_argument(
         "--mosaic-strategy",
-        choices=("full", "per-tile"),
+        choices=("full", "per-tile", "vrt"),
         default="full",
         help="Mosaic strategy for multiple DEMs (default: full).",
+    )
+    auto.add_argument(
+        "--normalized-compression",
+        choices=("none", "lzw", "deflate"),
+        default="none",
+        help="Compression for normalized tiles (default: none).",
+    )
+    auto.add_argument(
+        "--cache-sha256",
+        action="store_true",
+        help="Validate normalization cache with SHA-256 checksums.",
     )
     auto.add_argument(
         "--continue-on-error",
@@ -682,6 +948,39 @@ def _add_autoortho_parser(subparsers: argparse._SubParsersAction) -> None:
         help="Command to invoke DSFTool for DSF validation.",
     )
     auto.add_argument(
+        "--dsf-validation",
+        choices=("none", "bounds", "roundtrip"),
+        default="roundtrip",
+        help="DSF validation mode (bounds parses properties; roundtrip runs dsf2text+text2dsf).",
+    )
+    auto.add_argument(
+        "--dsf-validation-workers",
+        type=int,
+        default=None,
+        help="Parallel DSF validation workers (default: half of CPU cores).",
+    )
+    auto.add_argument(
+        "--validate-all",
+        action="store_true",
+        help="Validate tiles even when they already have warnings/errors.",
+    )
+    auto.add_argument(
+        "--ddstool",
+        nargs="+",
+        help="Command to invoke DDSTool for DDS validation.",
+    )
+    auto.add_argument(
+        "--dds-validation",
+        choices=("none", "header", "ddstool"),
+        default="none",
+        help="DDS validation mode (header is fast; ddstool runs --info).",
+    )
+    auto.add_argument(
+        "--dds-strict",
+        action="store_true",
+        help="Treat DDS validation failures as errors.",
+    )
+    auto.add_argument(
         "--global-scenery",
         help="Path to a Global Scenery folder for XP12 raster checks.",
     )
@@ -689,6 +988,11 @@ def _add_autoortho_parser(subparsers: argparse._SubParsersAction) -> None:
         "--enrich-xp12",
         action="store_true",
         help="Attempt to copy XP12 rasters from Global Scenery.",
+    )
+    auto.add_argument(
+        "--xp12-strict",
+        action="store_true",
+        help="Treat missing XP12 rasters as errors.",
     )
     auto.add_argument(
         "--warn-triangles",
@@ -706,6 +1010,11 @@ def _add_autoortho_parser(subparsers: argparse._SubParsersAction) -> None:
         "--allow-triangle-overage",
         action="store_true",
         help="Allow triangle estimates above the max threshold.",
+    )
+    auto.add_argument(
+        "--autoortho-texture-strict",
+        action="store_true",
+        help="Treat missing/invalid AutoOrtho textures as errors.",
     )
     auto.add_argument(
         "--batch",
@@ -746,6 +1055,21 @@ def _add_autoortho_parser(subparsers: argparse._SubParsersAction) -> None:
         "--bundle-diagnostics",
         action="store_true",
         help="Bundle diagnostics artifacts after the build completes.",
+    )
+    auto.add_argument(
+        "--provenance-level",
+        choices=("basic", "strict"),
+        default="basic",
+        help="Provenance detail level (default: basic).",
+    )
+    auto.add_argument(
+        "--stable-metadata",
+        action="store_true",
+        help="Omit volatile metadata fields like created_at from plan/report.",
+    )
+    auto.add_argument(
+        "--pinned-versions",
+        help="Override pinned versions config (defaults to package or DEM2DSF_PINNED_VERSIONS).",
     )
     auto.add_argument(
         "--dsftool-timeout",
@@ -843,6 +1167,10 @@ def _add_patch_parser(subparsers: argparse._SubParsersAction) -> None:
         help="Optional DSFTool override.",
     )
     patch.add_argument(
+        "--dsftool-path",
+        help="Path to the DSFTool binary (shorthand for --dsftool).",
+    )
+    patch.add_argument(
         "--dry-run",
         action="store_true",
         help="Write patch plan/report only.",
@@ -851,9 +1179,7 @@ def _add_patch_parser(subparsers: argparse._SubParsersAction) -> None:
 
 def _add_scan_parser(subparsers: argparse._SubParsersAction) -> None:
     """Register the Custom Scenery scan subcommand."""
-    scan = subparsers.add_parser(
-        "scan", help="Scan Custom Scenery for conflicting tiles."
-    )
+    scan = subparsers.add_parser("scan", help="Scan Custom Scenery for conflicting tiles.")
     scan.add_argument(
         "--scenery-root",
         required=True,
@@ -872,13 +1198,9 @@ def _add_scan_parser(subparsers: argparse._SubParsersAction) -> None:
 
 def _add_cache_parser(subparsers: argparse._SubParsersAction) -> None:
     """Register the Ortho4XP cache inspection subcommands."""
-    cache = subparsers.add_parser(
-        "cache", help="Inspect or purge Ortho4XP cache entries."
-    )
+    cache = subparsers.add_parser("cache", help="Inspect or purge Ortho4XP cache entries.")
     cache_sub = cache.add_subparsers(dest="cache_command", required=True)
-    cache_list = cache_sub.add_parser(
-        "list", help="List cache entries for a tile."
-    )
+    cache_list = cache_sub.add_parser("list", help="List cache entries for a tile.")
     cache_list.add_argument(
         "--ortho-root",
         required=True,
@@ -895,9 +1217,7 @@ def _add_cache_parser(subparsers: argparse._SubParsersAction) -> None:
         "--output",
         help="Optional path to write the cache report JSON.",
     )
-    cache_purge = cache_sub.add_parser(
-        "purge", help="Delete cache entries for a tile."
-    )
+    cache_purge = cache_sub.add_parser("purge", help="Delete cache entries for a tile.")
     cache_purge.add_argument(
         "--ortho-root",
         required=True,
@@ -925,11 +1245,35 @@ def _add_cache_parser(subparsers: argparse._SubParsersAction) -> None:
     )
 
 
+def _add_clean_parser(subparsers: argparse._SubParsersAction) -> None:
+    """Register the build cleanup subcommand."""
+    clean = subparsers.add_parser("clean", help="Remove cached build artifacts.")
+    clean.add_argument(
+        "--build-dir",
+        default="build",
+        help="Build directory to clean.",
+    )
+    clean.add_argument(
+        "--include",
+        action="append",
+        choices=tuple(supported_clean_targets()),
+        help="Artifact groups to remove (repeatable).",
+    )
+    clean.add_argument(
+        "--all",
+        action="store_true",
+        help="Clean all supported artifact groups.",
+    )
+    clean.add_argument(
+        "--confirm",
+        action="store_true",
+        help="Apply deletions (default is dry-run).",
+    )
+
+
 def _add_publish_parser(subparsers: argparse._SubParsersAction) -> None:
     """Register the publish subcommand."""
-    publish = subparsers.add_parser(
-        "publish", help="Package a build directory into a zip archive."
-    )
+    publish = subparsers.add_parser("publish", help="Package a build directory into a zip archive.")
     publish.add_argument(
         "--build-dir",
         default="build",
@@ -939,6 +1283,12 @@ def _add_publish_parser(subparsers: argparse._SubParsersAction) -> None:
         "--output",
         default="build.zip",
         help="Zip file output path.",
+    )
+    publish.add_argument(
+        "--mode",
+        choices=("full", "scenery"),
+        default="full",
+        help="Publish mode: full includes all artifacts; scenery keeps essentials only.",
     )
     publish.add_argument(
         "--dsf-7z",
@@ -963,9 +1313,7 @@ def _add_publish_parser(subparsers: argparse._SubParsersAction) -> None:
 
 def _add_presets_parser(subparsers: argparse._SubParsersAction) -> None:
     """Register the preset library subcommands."""
-    presets = subparsers.add_parser(
-        "presets", help="List or inspect built-in presets."
-    )
+    presets = subparsers.add_parser("presets", help="List or inspect built-in presets.")
     preset_sub = presets.add_subparsers(dest="preset_command", required=True)
     preset_list = preset_sub.add_parser("list", help="List available presets.")
     preset_list.add_argument(
@@ -982,25 +1330,18 @@ def _add_presets_parser(subparsers: argparse._SubParsersAction) -> None:
         default="text",
         help="Output format.",
     )
-    preset_import = preset_sub.add_parser(
-        "import", help="Import user-defined presets from JSON."
-    )
+    preset_import = preset_sub.add_parser("import", help="Import user-defined presets from JSON.")
     preset_import.add_argument("path", help="Input JSON file.")
     preset_import.add_argument(
         "--user-path",
-        help=(
-            "User preset file destination. Defaults to "
-            f"{default_user_presets_path()!s}."
-        ),
+        help=(f"User preset file destination. Defaults to {default_user_presets_path()!s}."),
     )
     preset_import.add_argument(
         "--replace",
         action="store_true",
         help="Replace existing user presets instead of merging.",
     )
-    preset_export = preset_sub.add_parser(
-        "export", help="Export user-defined presets to JSON."
-    )
+    preset_export = preset_sub.add_parser("export", help="Export user-defined presets to JSON.")
     preset_export.add_argument(
         "--output",
         default="-",
@@ -1008,10 +1349,7 @@ def _add_presets_parser(subparsers: argparse._SubParsersAction) -> None:
     )
     preset_export.add_argument(
         "--user-path",
-        help=(
-            "User preset file source. Defaults to "
-            f"{default_user_presets_path()!s}."
-        ),
+        help=(f"User preset file source. Defaults to {default_user_presets_path()!s}."),
     )
     preset_export.add_argument(
         "--include-builtins",
@@ -1045,6 +1383,215 @@ def _default_ortho_runner() -> list[str] | None:
     return [sys.executable, "-m", "dem2dsf.runners.ortho4xp"]
 
 
+def _argv_has_flag(argv: list[str], *flags: str) -> bool:
+    for token in argv:
+        for flag in flags:
+            if token == flag or token.startswith(f"{flag}="):
+                return True
+    return False
+
+
+def _coerce_list(value: object) -> list[str] | None:
+    if value is None:
+        return None
+    if isinstance(value, (list, tuple)):
+        return [str(item) for item in value]
+    if isinstance(value, str):
+        return [value]
+    return [str(value)]
+
+
+def _tiles_from_report(build_dir: Path) -> list[str] | None:
+    report_path = build_dir / "build_report.json"
+    if not report_path.exists():
+        return None
+    try:
+        payload = json.loads(report_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(payload, dict):
+        return None
+    tiles = []
+    for entry in payload.get("tiles", []):
+        if not isinstance(entry, dict):
+            continue
+        tile = entry.get("tile")
+        if tile:
+            tiles.append(str(tile))
+    return tiles or None
+
+
+def _tiles_from_plan(build_dir: Path) -> list[str] | None:
+    plan_path = build_dir / "build_plan.json"
+    if not plan_path.exists():
+        return None
+    try:
+        payload = json.loads(plan_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(payload, dict):
+        return None
+    tiles = payload.get("tiles", [])
+    if not isinstance(tiles, list):
+        return None
+    tile_list = [str(tile) for tile in tiles if tile]
+    return tile_list or None
+
+
+def _dems_from_plan(build_dir: Path) -> list[Path] | None:
+    plan_path = build_dir / "build_plan.json"
+    if not plan_path.exists():
+        return None
+    try:
+        payload = json.loads(plan_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(payload, dict):
+        return None
+    inputs = payload.get("inputs", {})
+    if not isinstance(inputs, dict):
+        return None
+    dem_list = inputs.get("dems", [])
+    if not isinstance(dem_list, list):
+        return None
+    dem_paths = [Path(path) for path in dem_list if path]
+    return dem_paths or None
+
+
+def _apply_dsftool_path(args: argparse.Namespace) -> None:
+    if hasattr(args, "dsftool_path") and getattr(args, "dsftool_path", None):
+        if getattr(args, "dsftool", None) is None:
+            args.dsftool = [str(args.dsftool_path)]
+
+
+def _apply_build_config(
+    args: argparse.Namespace,
+    config: object | None,
+    argv: list[str],
+) -> None:
+    if config is None:
+        return
+    inputs = getattr(config, "inputs", {})
+    options = getattr(config, "options", {})
+    tools = getattr(config, "tools", {})
+    output_dir = getattr(config, "output_dir", None)
+
+    if inputs.get("dem_stack") and not _argv_has_flag(argv, "--dem-stack", "--dem"):
+        args.dem_stack = inputs.get("dem_stack")
+        args.dem = None
+    elif inputs.get("dems") and not _argv_has_flag(argv, "--dem", "--dem-stack"):
+        args.dem = list(inputs.get("dems", []))
+
+    if inputs.get("tiles") and not _argv_has_flag(argv, "--tile"):
+        args.tile = list(inputs.get("tiles", []))
+    if inputs.get("aoi") and not _argv_has_flag(argv, "--aoi"):
+        args.aoi = inputs.get("aoi")
+    if inputs.get("aoi_crs") and not _argv_has_flag(argv, "--aoi-crs"):
+        args.aoi_crs = inputs.get("aoi_crs")
+    if output_dir and not _argv_has_flag(argv, "--output"):
+        args.output = str(output_dir)
+
+    if tools.get("runner") and not _argv_has_flag(argv, "--runner"):
+        args.runner = list(tools.get("runner", []))
+    if tools.get("dsftool") and not _argv_has_flag(argv, "--dsftool", "--dsftool-path"):
+        args.dsftool = list(tools.get("dsftool", []))
+    if tools.get("ddstool") and not _argv_has_flag(argv, "--ddstool"):
+        args.ddstool = list(tools.get("ddstool", []))
+
+    def set_option(flags: tuple[str, ...], attr: str, value: object) -> None:
+        if value is None:
+            return
+        if _argv_has_flag(argv, *flags):
+            return
+        setattr(args, attr, value)
+
+    set_option(("--quality",), "quality", options.get("quality"))
+    set_option(("--density",), "density", options.get("density"))
+    set_option(("--autoortho",), "autoortho", bool(options.get("autoortho", False)))
+    set_option(
+        ("--autoortho-texture-strict",),
+        "autoortho_texture_strict",
+        bool(options.get("autoortho_texture_strict", False)),
+    )
+    set_option(("--infer-tiles",), "infer_tiles", bool(options.get("infer_tiles", False)))
+    set_option(("--target-crs",), "target_crs", options.get("target_crs"))
+    set_option(("--target-resolution",), "target_resolution", options.get("target_resolution"))
+    set_option(("--resampling",), "resampling", options.get("resampling"))
+    set_option(("--dst-nodata",), "dst_nodata", options.get("dst_nodata"))
+    set_option(("--fill-strategy",), "fill_strategy", options.get("fill_strategy"))
+    set_option(("--fill-value",), "fill_value", options.get("fill_value"))
+    if "fallback_dem_paths" in options and not _argv_has_flag(argv, "--fallback-dem"):
+        args.fallback_dem = _coerce_list(options.get("fallback_dem_paths"))
+    if "normalize" in options and not _argv_has_flag(argv, "--skip-normalize"):
+        args.skip_normalize = not bool(options.get("normalize", True))
+    if "coverage_metrics" in options and not _argv_has_flag(argv, "--skip-coverage-metrics"):
+        args.skip_coverage_metrics = not bool(options.get("coverage_metrics", True))
+    if "tile_jobs" in options and not _argv_has_flag(argv, "--tile-jobs", "--jobs"):
+        tile_jobs = options.get("tile_jobs")
+        if tile_jobs is not None:
+            args.tile_jobs = int(tile_jobs)
+    if "warn_triangles" in options and not _argv_has_flag(argv, "--warn-triangles"):
+        warn_triangles = options.get("warn_triangles")
+        if warn_triangles is not None:
+            args.warn_triangles = int(warn_triangles)
+    if "triangle_warn" in options and not _argv_has_flag(argv, "--warn-triangles"):
+        triangle_warn = options.get("triangle_warn")
+        if triangle_warn is not None:
+            args.warn_triangles = int(triangle_warn)
+    if "triangle_max" in options and not _argv_has_flag(argv, "--max-triangles"):
+        triangle_max = options.get("triangle_max")
+        if triangle_max is not None:
+            args.max_triangles = int(triangle_max)
+    if "allow_triangle_overage" in options and not _argv_has_flag(argv, "--allow-triangle-overage"):
+        args.allow_triangle_overage = bool(options.get("allow_triangle_overage", False))
+    if "continue_on_error" in options and not _argv_has_flag(argv, "--continue-on-error"):
+        args.continue_on_error = bool(options.get("continue_on_error", False))
+    if "coverage_min" in options and not _argv_has_flag(argv, "--min-coverage"):
+        args.min_coverage = options.get("coverage_min")
+    if "coverage_hard_fail" in options and not _argv_has_flag(argv, "--coverage-hard-fail"):
+        args.coverage_hard_fail = bool(options.get("coverage_hard_fail", False))
+    if "mosaic_strategy" in options and not _argv_has_flag(argv, "--mosaic-strategy"):
+        args.mosaic_strategy = options.get("mosaic_strategy")
+    if "runner_timeout" in options and not _argv_has_flag(argv, "--runner-timeout"):
+        args.runner_timeout = options.get("runner_timeout")
+    if "runner_retries" in options and not _argv_has_flag(argv, "--runner-retries"):
+        args.runner_retries = options.get("runner_retries")
+    if "runner_stream_logs" in options and not _argv_has_flag(argv, "--runner-stream-logs"):
+        args.runner_stream_logs = bool(options.get("runner_stream_logs", False))
+    if "dsftool_timeout" in options and not _argv_has_flag(argv, "--dsftool-timeout"):
+        args.dsftool_timeout = options.get("dsftool_timeout")
+    if "dsftool_retries" in options and not _argv_has_flag(argv, "--dsftool-retries"):
+        args.dsftool_retries = options.get("dsftool_retries")
+    if "bundle_diagnostics" in options and not _argv_has_flag(argv, "--bundle-diagnostics"):
+        args.bundle_diagnostics = bool(options.get("bundle_diagnostics", False))
+    if "dry_run" in options and not _argv_has_flag(argv, "--dry-run"):
+        args.dry_run = bool(options.get("dry_run", False))
+    if "dem_stack_path" in options and not _argv_has_flag(argv, "--dem-stack", "--dem"):
+        args.dem_stack = options.get("dem_stack_path")
+    if "dsf_validation" in options and not _argv_has_flag(argv, "--dsf-validation"):
+        args.dsf_validation = options.get("dsf_validation")
+    if "dsf_validation_workers" in options and not _argv_has_flag(argv, "--dsf-validation-workers"):
+        args.dsf_validation_workers = options.get("dsf_validation_workers")
+    if "validate_all" in options and not _argv_has_flag(argv, "--validate-all"):
+        args.validate_all = bool(options.get("validate_all", False))
+    if "dds_validation" in options and not _argv_has_flag(argv, "--dds-validation"):
+        args.dds_validation = options.get("dds_validation")
+    if "dds_strict" in options and not _argv_has_flag(argv, "--dds-strict"):
+        args.dds_strict = bool(options.get("dds_strict", False))
+    if "global_scenery" in options and not _argv_has_flag(argv, "--global-scenery"):
+        args.global_scenery = options.get("global_scenery")
+    if "enrich_xp12" in options and not _argv_has_flag(argv, "--enrich-xp12"):
+        args.enrich_xp12 = bool(options.get("enrich_xp12", False))
+    if "xp12_strict" in options and not _argv_has_flag(argv, "--xp12-strict"):
+        args.xp12_strict = bool(options.get("xp12_strict", False))
+    if "profile" in options and not _argv_has_flag(argv, "--profile"):
+        args.profile = bool(options.get("profile", False))
+    if "metrics_json" in options and not _argv_has_flag(argv, "--metrics-json"):
+        args.metrics_json = options.get("metrics_json")
+    if "resume" in options and not _argv_has_flag(argv, "--resume"):
+        args.resume = options.get("resume")
+
+
 def _apply_tool_defaults(args: argparse.Namespace) -> None:
     """Populate CLI defaults using the tool discovery config."""
     tool_paths = load_tool_paths()
@@ -1059,6 +1606,10 @@ def _apply_tool_defaults(args: argparse.Namespace) -> None:
         dsftool = tool_paths.get("dsftool")
         if dsftool:
             args.dsftool = [str(dsftool)]
+    if hasattr(args, "ddstool") and args.ddstool is None:
+        ddstool = tool_paths.get("ddstool")
+        if ddstool:
+            args.ddstool = [str(ddstool)]
     if hasattr(args, "sevenzip_path") and args.sevenzip_path is None:
         sevenzip = tool_paths.get("7zip") or tool_paths.get("sevenzip")
         if sevenzip:
@@ -1099,17 +1650,20 @@ def main(argv: list[str] | None = None) -> int:
     subparsers = parser.add_subparsers(dest="command", required=True)
     _add_build_parser(subparsers)
     _add_wizard_parser(subparsers)
+    _add_tiles_parser(subparsers)
     _add_doctor_parser(subparsers)
     _add_autoortho_parser(subparsers)
     _add_overlay_parser(subparsers)
     _add_patch_parser(subparsers)
     _add_scan_parser(subparsers)
     _add_cache_parser(subparsers)
+    _add_clean_parser(subparsers)
     _add_publish_parser(subparsers)
     _add_presets_parser(subparsers)
     _add_version_parser(subparsers)
     _add_gui_parser(subparsers)
 
+    argv_list = list(argv) if argv is not None else sys.argv[1:]
     args = parser.parse_args(argv)
     log_file_value = getattr(args, "log_file", None)
     log_options = LogOptions(
@@ -1119,7 +1673,16 @@ def main(argv: list[str] | None = None) -> int:
         json_console=bool(getattr(args, "log_json", False)),
     )
     configure_logging(log_options)
+    _apply_dsftool_path(args)
     _apply_tool_defaults(args)
+    if args.command == "build" and getattr(args, "config", None):
+        try:
+            config = load_build_config(Path(args.config))
+        except (OSError, json.JSONDecodeError, TypeError, ValueError) as exc:
+            LOGGER.error("Failed to load build config: %s", exc)
+            return 1
+        _apply_build_config(args, config, argv_list)
+        _apply_dsftool_path(args)
 
     if args.command == "version":
         print(__version__)
@@ -1130,16 +1693,44 @@ def main(argv: list[str] | None = None) -> int:
         launch_gui()
         return 0
     if args.command == "build":
-        if not args.tile:
-            parser.error("--tile is required for build")
-        if not args.dem and not args.dem_stack:
+        output_dir = Path(args.output)
+        dem_paths = [Path(path) for path in (args.dem or [])]
+        if args.dem_stack:
+            stack = load_dem_stack(Path(args.dem_stack))
+            dem_paths = [layer.path for layer in stack.layers]
+        if args.resume and not dem_paths and not args.dem_stack:
+            dem_paths = _dems_from_plan(output_dir) or []
+            if not dem_paths and args.resume != "validate-only":
+                parser.error("Resume build requires DEM inputs or an existing build_plan.json")
+        if not dem_paths and not args.dem_stack and not args.resume:
             parser.error("--dem or --dem-stack is required for build")
+        tiles = args.tile or []
+        if not tiles:
+            if args.infer_tiles:
+                if not dem_paths:
+                    parser.error("--infer-tiles requires DEM inputs")
+                inference = infer_tiles(
+                    dem_paths,
+                    aoi_path=Path(args.aoi) if args.aoi else None,
+                    aoi_crs=args.aoi_crs,
+                )
+                for warning in inference.warnings:
+                    LOGGER.warning("%s", warning)
+                tiles = inference.tiles
+                if not tiles:
+                    parser.error("No tiles inferred from DEM/AOI bounds.")
+            elif args.resume:
+                tiles = _tiles_from_plan(output_dir) or _tiles_from_report(output_dir) or []
+                if not tiles and args.resume != "validate-only":
+                    parser.error("Resume build requires tiles or an existing build_plan.json")
+            else:
+                parser.error("--tile is required for build unless --infer-tiles is set")
         options = _build_options_from_args(args).as_dict()
         result = run_build(
-            dem_paths=[Path(path) for path in (args.dem or [])],
-            tiles=args.tile,
+            dem_paths=dem_paths,
+            tiles=tiles,
             backend_name="ortho4xp",
-            output_dir=Path(args.output),
+            output_dir=output_dir,
             options=options,
         )
         errors = result.build_report.get("errors", [])
@@ -1161,10 +1752,39 @@ def main(argv: list[str] | None = None) -> int:
         )
         LOGGER.info("Wizard completed. Build plan and report written.")
         return 0
+    if args.command == "tiles":
+        if not args.dem and not args.dem_stack:
+            parser.error("--dem or --dem-stack is required for tiles")
+        dem_paths = [Path(path) for path in (args.dem or [])]
+        if args.dem_stack:
+            stack = load_dem_stack(Path(args.dem_stack))
+            dem_paths = [layer.path for layer in stack.layers]
+        inference = infer_tiles(
+            dem_paths,
+            aoi_path=Path(args.aoi) if args.aoi else None,
+            aoi_crs=args.aoi_crs,
+        )
+        for warning in inference.warnings:
+            LOGGER.warning("%s", warning)
+        if args.json:
+            payload = {
+                "tiles": inference.tiles,
+                "bounds": inference.bounds,
+                "dem_bounds": inference.dem_bounds,
+                "aoi_bounds": inference.aoi_bounds,
+                "coverage": inference.coverage,
+                "warnings": list(inference.warnings),
+            }
+            print(json.dumps(payload, indent=2))
+        else:
+            for tile in inference.tiles:
+                print(tile)
+        return 0
     if args.command == "doctor":
         results = run_doctor(
             ortho_runner=args.runner,
             dsftool_path=args.dsftool,
+            ddstool_path=args.ddstool,
         )
         for result in results:
             LOGGER.info("%s: %s - %s", result.name, result.status, result.detail)
@@ -1231,9 +1851,7 @@ def main(argv: list[str] | None = None) -> int:
             for error in errors:
                 LOGGER.error("Overlay error: %s", error)
             return 1
-        LOGGER.info(
-            "Overlay report written to %s", output_dir / "overlay_report.json"
-        )
+        LOGGER.info("Overlay report written to %s", output_dir / "overlay_report.json")
         return 0
     if args.command == "patch":
         overrides = {}
@@ -1257,9 +1875,7 @@ def main(argv: list[str] | None = None) -> int:
             tiles=args.tile or None,
         )
         if args.output:
-            Path(args.output).write_text(
-                json.dumps(report, indent=2), encoding="utf-8"
-            )
+            Path(args.output).write_text(json.dumps(report, indent=2), encoding="utf-8")
         conflicts = report.get("conflicts", [])
         LOGGER.info("Found %s conflict(s).", len(conflicts))
         snippet = report.get("suggested_order_snippet")
@@ -1280,14 +1896,10 @@ def main(argv: list[str] | None = None) -> int:
             payload = {
                 "ortho_root": str(ortho_root),
                 "tile": args.tile,
-                "entries": {
-                    key: [str(path) for path in paths] for key, paths in entries.items()
-                },
+                "entries": {key: [str(path) for path in paths] for key, paths in entries.items()},
             }
             if args.output:
-                Path(args.output).write_text(
-                    json.dumps(payload, indent=2), encoding="utf-8"
-                )
+                Path(args.output).write_text(json.dumps(payload, indent=2), encoding="utf-8")
             else:
                 print(json.dumps(payload, indent=2))
             return 0
@@ -1299,12 +1911,19 @@ def main(argv: list[str] | None = None) -> int:
                 dry_run=not args.confirm,
             )
             if args.output:
-                Path(args.output).write_text(
-                    json.dumps(report, indent=2), encoding="utf-8"
-                )
+                Path(args.output).write_text(json.dumps(report, indent=2), encoding="utf-8")
             else:
                 print(json.dumps(report, indent=2))
             return 0
+    if args.command == "clean":
+        build_dir = Path(args.build_dir)
+        include = list(args.include or [])
+        if args.all or not include:
+            include = list(supported_clean_targets())
+        report = clean_build(build_dir, include=include, dry_run=not args.confirm)
+        for line in format_clean_summary(report):
+            LOGGER.info("%s", line)
+        return 0
     if args.command == "publish":
         sevenzip_path = Path(args.sevenzip_path) if args.sevenzip_path else None
         if args.dsf_7z and sevenzip_path is None:
@@ -1318,16 +1937,13 @@ def main(argv: list[str] | None = None) -> int:
                 if response:
                     sevenzip_path = Path(response)
                 elif not args.allow_missing_7z:
-                    parser.error(
-                        "7z not found; pass --sevenzip-path or --allow-missing-7z."
-                    )
+                    parser.error("7z not found; pass --sevenzip-path or --allow-missing-7z.")
             elif not args.allow_missing_7z:
-                parser.error(
-                    "7z not found; pass --sevenzip-path or --allow-missing-7z."
-                )
+                parser.error("7z not found; pass --sevenzip-path or --allow-missing-7z.")
         result = publish_build(
             Path(args.build_dir),
             Path(args.output),
+            mode=args.mode,
             dsf_7z=args.dsf_7z,
             dsf_7z_backup=args.dsf_7z_backup,
             sevenzip_path=sevenzip_path,
@@ -1367,9 +1983,7 @@ def main(argv: list[str] | None = None) -> int:
             except (OSError, json.JSONDecodeError) as exc:
                 LOGGER.error("Failed to load presets: %s", exc)
                 return 1
-            dest_path = (
-                Path(args.user_path) if args.user_path else default_user_presets_path()
-            )
+            dest_path = Path(args.user_path) if args.user_path else default_user_presets_path()
             existing = {} if args.replace else load_user_presets(dest_path)
             merged = dict(existing)
             merged.update(incoming)
@@ -1381,10 +1995,7 @@ def main(argv: list[str] | None = None) -> int:
             user_presets = load_user_presets(user_path)
             presets_to_export = dict(user_presets)
             if args.include_builtins:
-                builtins = {
-                    preset.name: preset
-                    for preset in list_presets(include_user=False)
-                }
+                builtins = {preset.name: preset for preset in list_presets(include_user=False)}
                 presets_to_export = dict(builtins)
                 presets_to_export.update(user_presets)
             payload = serialize_presets(presets_to_export)

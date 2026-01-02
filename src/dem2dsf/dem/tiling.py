@@ -9,8 +9,9 @@ from typing import Iterable, Tuple
 import rasterio
 from rasterio.enums import Resampling
 from rasterio.transform import from_bounds
-from rasterio.warp import reproject, transform_bounds
+from rasterio.warp import reproject
 
+from dem2dsf.dem.crs import transform_bounds as transform_bounds_xy
 from dem2dsf.dem.models import TileResult
 
 Bounds = Tuple[float, float, float, float]
@@ -38,7 +39,12 @@ def tile_bounds_in_crs(tile: str, crs: rasterio.CRS) -> Bounds:
     """Return tile bounds transformed into the requested CRS."""
     bounds = tile_bounds(tile)
     if crs != rasterio.CRS.from_epsg(4326):
-        return transform_bounds("EPSG:4326", crs, *bounds, densify_pts=21)
+        return transform_bounds_xy(
+            bounds,
+            "EPSG:4326",
+            crs.to_string(),
+            densify_pts=21,
+        )
     return bounds
 
 
@@ -64,6 +70,7 @@ def write_tile_dem(
     resolution: Tuple[float, float] | None = None,
     resampling: Resampling = Resampling.bilinear,
     dst_nodata: float | None = None,
+    compression: str | None = None,
 ) -> TileResult:
     """Clip and resample a DEM into a single tile GeoTIFF."""
     bounds_wgs84 = tile_bounds(tile)
@@ -88,6 +95,8 @@ def write_tile_dem(
                 "nodata": nodata,
             }
         )
+        if compression:
+            meta["compress"] = compression
         output_path.parent.mkdir(parents=True, exist_ok=True)
         with rasterio.open(output_path, "w", **meta) as dest:
             for band in range(1, src.count + 1):

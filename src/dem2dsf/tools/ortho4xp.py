@@ -10,7 +10,12 @@ import warnings
 from pathlib import Path
 from typing import Iterable, Mapping
 
-from dem2dsf.xplane_paths import bucket_for_tile, elevation_data_path, hgt_tile_name
+from dem2dsf.xplane_paths import (
+    bucket_for_tile,
+    elevation_data_path,
+    hgt_tile_name,
+    parse_tile,
+)
 
 
 class Ortho4XPNotFoundError(RuntimeError):
@@ -111,6 +116,12 @@ def stage_custom_dem(root: Path, tile: str, dem_path: Path) -> Path:
     """Copy a tile DEM into Ortho4XP's Elevation_data folder."""
     destination = elevation_data_path(root, tile, dem_path.suffix)
     destination.parent.mkdir(parents=True, exist_ok=True)
+    stem = hgt_tile_name(tile)
+    for candidate in destination.parent.glob(f"{stem}.*"):
+        if candidate == destination:
+            continue
+        if candidate.is_file():
+            candidate.unlink()
     shutil.copy(dem_path, destination)
     return destination
 
@@ -126,12 +137,28 @@ def build_command(
 ) -> list[str]:
     """Build a command line to run Ortho4XP."""
     cmd = [python_exe or sys.executable, str(script_path)]
+    supports_flags = _script_supports_flag_args(script_path)
+    if supports_flags:
+        if extra_args:
+            cmd.extend(list(extra_args))
+        cmd.extend(["--tile", tile])
+        if include_output:
+            cmd.extend(["--output", str(output_dir)])
+        return cmd
+    lat, lon = parse_tile(tile)
+    cmd.extend([str(lat), str(lon)])
     if extra_args:
-        cmd.extend(list(extra_args))
-    cmd.extend(["--tile", tile])
-    if include_output:
-        cmd.extend(["--output", str(output_dir)])
+        cmd.extend([arg for arg in extra_args if not str(arg).startswith("-")])
     return cmd
+
+
+def _script_supports_flag_args(script_path: Path) -> bool:
+    """Return True if the script appears to support flag-style args."""
+    try:
+        content = script_path.read_text(encoding="utf-8", errors="ignore")
+    except OSError:
+        return False
+    return any(flag in content for flag in ("--tile", "--batch", "--output"))
 
 
 def default_scenery_root(root: Path) -> Path:
@@ -280,12 +307,10 @@ def patch_config_values(
     return original
 
 
-def read_config_values(config_path: Path) -> dict[str, str]:
-    """Read key/value pairs from Ortho4XP.cfg."""
-    if not config_path.exists():
-        return {}
+def parse_config_values(text: str) -> dict[str, str]:
+    """Parse key/value pairs from Ortho4XP.cfg content."""
     values: dict[str, str] = {}
-    for raw_line in config_path.read_text(encoding="utf-8").splitlines():
+    for raw_line in text.splitlines():
         line = raw_line.strip()
         if not line or line.startswith("#"):
             continue
@@ -296,6 +321,13 @@ def read_config_values(config_path: Path) -> dict[str, str]:
         key, value = line.split("=", 1)
         values[key.strip()] = value.strip().strip("\"'")
     return values
+
+
+def read_config_values(config_path: Path) -> dict[str, str]:
+    """Read key/value pairs from Ortho4XP.cfg."""
+    if not config_path.exists():
+        return {}
+    return parse_config_values(config_path.read_text(encoding="utf-8"))
 
 
 def restore_config(config_path: Path, original: str | None) -> None:

@@ -17,7 +17,7 @@ class DummyResult:
 def test_parse_raster_names_variants() -> None:
     text = "\n".join(
         [
-            "RASTER_DEF 0 \"soundscape\"",
+            'RASTER_DEF 0 "soundscape"',
             "RASTER_DEF 1 season_spring_start",
             "raster_def 2 raster_foo",
             "raster_def 3 1234",
@@ -35,7 +35,7 @@ def test_parse_raster_names_variants() -> None:
 def test_extract_raster_blocks() -> None:
     text = "\n".join(
         [
-            "raster_def 0 \"soundscape\"",
+            'raster_def 0 "soundscape"',
             "raster_def 1 season_summer",
         ]
     )
@@ -77,7 +77,7 @@ def test_inventory_dsf_rasters_success(monkeypatch, tmp_path: Path) -> None:
     def fake_run(_tool, args, **_kwargs):
         if "--dsf2text" in args:
             Path(args[-1]).write_text(
-                "RASTER_DEF 0 \"soundscape\"\nRASTER_DEF 1 season_summer\n",
+                'RASTER_DEF 0 "soundscape"\nRASTER_DEF 1 season_summer\n',
                 encoding="utf-8",
             )
             return DummyResult(0)
@@ -193,6 +193,7 @@ def test_enrich_dsf_rasters_success(monkeypatch, tmp_path: Path) -> None:
         tmp_path / "work",
     )
     assert result.status == "enriched"
+    assert result.backup_path is not None
     assert Path(result.backup_path).exists()
 
 
@@ -273,11 +274,10 @@ def test_enrich_dsf_rasters_inserts_before_bounds(monkeypatch, tmp_path: Path) -
         tmp_path / "work",
     )
     assert result.status == "enriched"
-    enriched_text = (tmp_path / "work" / "tile.enriched.txt").read_text(
-        encoding="utf-8"
-    )
+    enriched_text = (tmp_path / "work" / "tile.enriched.txt").read_text(encoding="utf-8")
     lines = [line.strip() for line in enriched_text.splitlines() if line.strip()]
     assert lines.index("raster_def 0 soundscape") < lines.index("PROPERTY sim/west 8")
+
 
 def test_find_global_dsf(tmp_path: Path) -> None:
     root = tmp_path / "global"

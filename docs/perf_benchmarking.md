@@ -64,7 +64,7 @@ to skip optional sections.
 ## CI tracking
 CI runs `scripts/run_ci_perf.py` on a tiny synthetic DEM and uploads the
 `perf_ci/` artifacts (CSV + summary JSON). The thresholds are intentionally
-loose and meant to catch major regressions, not micro-optimizations.
+loose and warn-only to catch major regressions, not micro-optimizations.
 
 Baseline trends:
 - Default baseline: `perf_baselines/ci_baseline.json` in the repo.
@@ -72,5 +72,5 @@ Baseline trends:
   baseline is present.
 - Update the baseline after intentional changes:
   `python scripts/run_ci_perf.py --output-dir perf_ci --write-baseline`
-- `summary.json` now includes `python_version` and `platform` metadata for
-  baseline context.
+- `summary.json` now includes `python_version`, `python_implementation`,        
+  `platform`, `machine`, and `processor` metadata for baseline context.

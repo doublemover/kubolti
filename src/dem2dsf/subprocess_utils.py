@@ -23,6 +23,7 @@ class CommandResult:
 
 
 def _tail_text(path: Path, *, max_bytes: int = 65536, max_lines: int = 200) -> str:
+    """Return the tail of a text file for log summaries."""
     try:
         with path.open("rb") as handle:
             handle.seek(0, os.SEEK_END)
@@ -52,18 +53,14 @@ def run_command(
     cmd_list = [str(item) for item in command]
     timed_out = False
     if stdout_path or stderr_path:
-        stdout_handle = (
-            stdout_path.open("w", encoding="utf-8") if stdout_path else subprocess.DEVNULL
-        )
-        stderr_handle = (
-            stderr_path.open("w", encoding="utf-8") if stderr_path else subprocess.DEVNULL
-        )
+        stdout_handle = stdout_path.open("w", encoding="utf-8") if stdout_path else None
+        stderr_handle = stderr_path.open("w", encoding="utf-8") if stderr_path else None
         try:
             result = subprocess.run(
                 cmd_list,
                 cwd=cwd,
-                stdout=stdout_handle,
-                stderr=stderr_handle,
+                stdout=stdout_handle or subprocess.DEVNULL,
+                stderr=stderr_handle or subprocess.DEVNULL,
                 text=True,
                 check=False,
                 timeout=timeout,
@@ -72,12 +69,20 @@ def run_command(
             timed_out = True
             result = subprocess.CompletedProcess(cmd_list, 124, "", "")
         finally:
-            if stdout_path:
+            if stdout_handle:
                 stdout_handle.close()
-            if stderr_path:
+            if stderr_handle:
                 stderr_handle.close()
-        stdout = _tail_text(stdout_path, max_bytes=tail_bytes, max_lines=tail_lines)
-        stderr = _tail_text(stderr_path, max_bytes=tail_bytes, max_lines=tail_lines)
+        stdout = (
+            _tail_text(stdout_path, max_bytes=tail_bytes, max_lines=tail_lines)
+            if stdout_path
+            else ""
+        )
+        stderr = (
+            _tail_text(stderr_path, max_bytes=tail_bytes, max_lines=tail_lines)
+            if stderr_path
+            else ""
+        )
         if timed_out:
             timeout_message = f"Command timed out after {timeout} seconds."
             stderr = f"{stderr}\n{timeout_message}" if stderr else timeout_message
@@ -111,8 +116,18 @@ def run_command(
         )
     except subprocess.TimeoutExpired as exc:
         timed_out = True
-        stdout = exc.stdout or ""
-        stderr = exc.stderr or ""
+        raw_stdout = exc.stdout or ""
+        raw_stderr = exc.stderr or ""
+        stdout = (
+            raw_stdout.decode("utf-8", errors="replace")
+            if isinstance(raw_stdout, bytes)
+            else raw_stdout
+        )
+        stderr = (
+            raw_stderr.decode("utf-8", errors="replace")
+            if isinstance(raw_stderr, bytes)
+            else raw_stderr
+        )
         timeout_message = f"Command timed out after {timeout} seconds."
         stderr = f"{stderr}\n{timeout_message}" if stderr else timeout_message
         return CommandResult(

@@ -19,11 +19,36 @@ def transformer(src: str | CRS, dst: str | CRS) -> Transformer:
     return Transformer.from_crs(normalize_crs(src), normalize_crs(dst), always_xy=True)
 
 
-def transform_bounds(bounds: Bounds, src: str | CRS, dst: str | CRS) -> Bounds:
+def _linspace(start: float, stop: float, count: int) -> list[float]:
+    """Return evenly spaced values between start and stop inclusive."""
+    if count <= 1:
+        return [start]
+    step = (stop - start) / (count - 1)
+    return [start + step * index for index in range(count)]
+
+
+def transform_bounds(
+    bounds: Bounds,
+    src: str | CRS,
+    dst: str | CRS,
+    *,
+    densify_pts: int = 0,
+) -> Bounds:
     """Transform bounding coordinates between CRSs."""
     minx, miny, maxx, maxy = bounds
     tx = transformer(src, dst)
-    xs = [minx, minx, maxx, maxx]
-    ys = [miny, maxy, miny, maxy]
+    if densify_pts > 0:
+        steps = densify_pts + 2
+        xs: list[float] = []
+        ys: list[float] = []
+        for x in _linspace(minx, maxx, steps):
+            xs.extend([x, x])
+            ys.extend([miny, maxy])
+        for y in _linspace(miny, maxy, steps):
+            xs.extend([minx, maxx])
+            ys.extend([y, y])
+    else:
+        xs = [minx, minx, maxx, maxx]
+        ys = [miny, maxy, miny, maxy]
     out_xs, out_ys = tx.transform(xs, ys)
     return (min(out_xs), min(out_ys), max(out_xs), max(out_ys))

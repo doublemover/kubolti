@@ -8,7 +8,7 @@ import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable
+from typing import Iterable, Sequence
 
 from dem2dsf.scenery import validate_overlay_source
 from dem2dsf.tools.config import load_tool_paths, ortho_root_from_paths
@@ -22,6 +22,15 @@ from dem2dsf.tools.ortho4xp import (
 )
 
 MIN_PYTHON = (3, 13)
+OVERLAY_RECOMMENDATION = (
+    "Set custom_overlay_src to your X-Plane Global Scenery folder "
+    "(for example: X-Plane 12/Global Scenery)."
+)
+COMMAND_HINTS = {
+    "ortho4xp_runner": "Set --runner or configure tools/tool_paths.json (ortho4xp).",
+    "dsftool": "Install XPTools and set --dsftool-path or tools/tool_paths.json.",
+    "ddstool": "Install XPTools and set --ddstool or tools/tool_paths.json.",
+}
 
 
 @dataclass(frozen=True)
@@ -68,10 +77,24 @@ def check_python_deps() -> Iterable[CheckResult]:
     return results
 
 
-def check_command(name: str, command: list[str] | None) -> CheckResult:
+def _normalize_command(command: Sequence[str] | str | None) -> list[str] | None:
+    """Normalize a command input into a list of strings."""
+    if command is None:
+        return None
+    if isinstance(command, str):
+        return [command]
+    return [str(item) for item in command]
+
+
+def check_command(name: str, command: Sequence[str] | str | None) -> CheckResult:
     """Probe an external command for availability and basic responsiveness."""
+    command = _normalize_command(command)
     if not command:
-        return _status(name, "warn", "not configured")
+        hint = COMMAND_HINTS.get(name)
+        detail = "not configured"
+        if hint:
+            detail = f"{detail}; {hint}"
+        return _status(name, "warn", detail)
     binary = command[0]
     if Path(binary).exists() or shutil.which(binary):
         try:
@@ -83,13 +106,22 @@ def check_command(name: str, command: list[str] | None) -> CheckResult:
             )
             if result.returncode == 0:
                 return _status(name, "ok", "command responded to --help")
-            return _status(name, "warn", f"non-zero exit: {result.returncode}")
+            hint = COMMAND_HINTS.get(name)
+            detail = f"non-zero exit: {result.returncode}"
+            if hint:
+                detail = f"{detail}; {hint}"
+            return _status(name, "warn", detail)
         except OSError as exc:
             return _status(name, "error", str(exc))
-    return _status(name, "error", "command not found")
+    hint = COMMAND_HINTS.get(name)
+    detail = "command not found"
+    if hint:
+        detail = f"{detail}; {hint}"
+    return _status(name, "error", detail)
 
 
 def _runner_flag_value(runner: list[str] | None, flag: str) -> str | None:
+    """Return the value for a runner flag if present."""
     if not runner:
         return None
     for index, token in enumerate(runner):
@@ -104,6 +136,7 @@ def _resolve_ortho_root(
     ortho_runner: list[str] | None,
     tool_paths: dict[str, Path],
 ) -> Path | None:
+    """Resolve the Ortho4XP root from runner flags, tool paths, or env."""
     root_override = _runner_flag_value(ortho_runner, "--ortho-root")
     if root_override:
         return Path(root_override).expanduser()
@@ -203,7 +236,7 @@ def check_overlay_source(
         return _status(
             "overlay_source",
             "warn",
-            "Ortho4XP root not configured",
+            "Ortho4XP root not configured; cannot read custom_overlay_src",
         )
     config_path = ortho_root / "Ortho4XP.cfg"
     config = read_config_values(config_path)
@@ -212,20 +245,22 @@ def check_overlay_source(
         return _status(
             "overlay_source",
             "warn",
-            f"custom_overlay_src not set in {config_path}",
+            f"custom_overlay_src not set in {config_path}; {OVERLAY_RECOMMENDATION}",
         )
     overlay_path = Path(overlay_value).expanduser()
     if not overlay_path.is_absolute():
         overlay_path = (ortho_root / overlay_path).resolve()
     result = validate_overlay_source(overlay_path)
     status = result["status"]
-    return _status("overlay_source", status, result["detail"])
+    detail = f"{result['detail']} (custom_overlay_src={overlay_path}; {OVERLAY_RECOMMENDATION})"
+    return _status("overlay_source", status, detail)
 
 
 def run_doctor(
     *,
     ortho_runner: list[str] | None,
-    dsftool_path: list[str] | None,
+    dsftool_path: Sequence[str] | str | None,
+    ddstool_path: Sequence[str] | str | None = None,
 ) -> list[CheckResult]:
     """Run all environment checks and return the aggregated results."""
     tool_paths = load_tool_paths()
@@ -235,4 +270,5 @@ def run_doctor(
     results.append(check_overlay_source(ortho_runner, tool_paths))
     results.append(check_command("ortho4xp_runner", ortho_runner))
     results.append(check_command("dsftool", dsftool_path))
+    results.append(check_command("ddstool", ddstool_path))
     return results

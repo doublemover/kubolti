@@ -50,9 +50,7 @@ def _resolution_from_options(
 
 def main() -> int:
     """CLI entrypoint for normalization benchmarks."""
-    parser = argparse.ArgumentParser(
-        description="Benchmark normalization performance."
-    )
+    parser = argparse.ArgumentParser(description="Benchmark normalization performance.")
     parser.add_argument("--dem", action="append", help="DEM input path.")
     parser.add_argument("--dem-stack", help="DEM stack JSON path.")
     parser.add_argument("--tile", action="append", help="Tile name like +DD+DDD.")
@@ -88,9 +86,7 @@ def main() -> int:
         help="Fill strategy.",
     )
     parser.add_argument("--fill-value", type=float, default=0.0, help="Fill value.")
-    parser.add_argument(
-        "--fallback-dem", action="append", help="Fallback DEM path(s)."
-    )
+    parser.add_argument("--fallback-dem", action="append", help="Fallback DEM path(s).")
     args = parser.parse_args()
 
     if not args.tile:
@@ -103,9 +99,7 @@ def main() -> int:
     backend_profile = profile_for_backend(args.backend)
 
     rows: list[dict[str, object]] = []
-    resolution = _resolution_from_options(
-        args.target_resolution, args.tile, args.target_crs
-    )
+    resolution = _resolution_from_options(args.target_resolution, args.tile, args.target_crs)
     for run in range(1, args.runs + 1):
         run_dir = output_dir / f"run_{run:02d}"
         if run_dir.exists():
@@ -126,9 +120,7 @@ def main() -> int:
                 resolution=resolution,
                 fill_strategy=args.fill_strategy,
                 fill_value=args.fill_value,
-                fallback_dem_paths=[
-                    Path(path) for path in args.fallback_dem or []
-                ],
+                fallback_dem_paths=[Path(path) for path in args.fallback_dem or []],
                 backend_profile=backend_profile,
             )
         else:
@@ -142,9 +134,7 @@ def main() -> int:
                 resolution=resolution,
                 fill_strategy=args.fill_strategy,
                 fill_value=args.fill_value,
-                fallback_dem_paths=[
-                    Path(path) for path in args.fallback_dem or []
-                ],
+                fallback_dem_paths=[Path(path) for path in args.fallback_dem or []],
                 backend_profile=backend_profile,
             )
         elapsed = perf_counter() - start

@@ -10,6 +10,7 @@ import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import cast
 
 import numpy as np
 import rasterio
@@ -137,9 +138,7 @@ def _write_trend(
 
 def main() -> int:
     """CLI entrypoint for CI performance checks."""
-    parser = argparse.ArgumentParser(
-        description="Run lightweight performance benchmarks for CI."
-    )
+    parser = argparse.ArgumentParser(description="Run lightweight performance benchmarks for CI.")
     parser.add_argument(
         "--output-dir",
         default="perf_ci",
@@ -180,6 +179,11 @@ def main() -> int:
         type=float,
         default=None,
         help="Fail if percent regression exceeds this threshold.",
+    )
+    parser.add_argument(
+        "--warn-only",
+        action="store_true",
+        help="Emit warnings instead of failing on threshold regressions.",
     )
     parser.add_argument(
         "--write-baseline",
@@ -238,7 +242,10 @@ def main() -> int:
         "normalize_max_seconds": args.normalize_max_seconds,
         "publish_max_seconds": args.publish_max_seconds,
         "python_version": platform.python_version(),
+        "python_implementation": platform.python_implementation(),
         "platform": platform.platform(),
+        "machine": platform.machine(),
+        "processor": platform.processor(),
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }
     summary_path = output_dir / "summary.json"
@@ -246,13 +253,9 @@ def main() -> int:
 
     failures = []
     if normalize_seconds > args.normalize_max_seconds:
-        failures.append(
-            f"normalize {normalize_seconds:.3f}s > {args.normalize_max_seconds:.3f}s"
-        )
+        failures.append(f"normalize {normalize_seconds:.3f}s > {args.normalize_max_seconds:.3f}s")
     if publish_seconds > args.publish_max_seconds:
-        failures.append(
-            f"publish {publish_seconds:.3f}s > {args.publish_max_seconds:.3f}s"
-        )
+        failures.append(f"publish {publish_seconds:.3f}s > {args.publish_max_seconds:.3f}s")
 
     baseline_path = Path(args.baseline) if args.baseline else None
     if baseline_path:
@@ -261,14 +264,12 @@ def main() -> int:
             trend = _write_trend(output_dir, summary, baseline_path, baseline)
             max_regression = args.baseline_max_regression_pct
             if max_regression is not None:
-                deltas = trend["delta_percent"]
+                deltas = cast(dict[str, float | None], trend["delta_percent"])
                 for key, delta in deltas.items():
                     if delta is None:
                         continue
                     if delta > max_regression:
-                        failures.append(
-                            f"{key} regression {delta:.2f}% > {max_regression:.2f}%"
-                        )
+                        failures.append(f"{key} regression {delta:.2f}% > {max_regression:.2f}%")
         elif baseline_path.exists():
             print(f"Baseline file invalid: {baseline_path}")
     if args.write_baseline and baseline_path:
@@ -276,10 +277,12 @@ def main() -> int:
         baseline_path.write_text(json.dumps(summary, indent=2), encoding="utf-8")
 
     if failures:
-        print("Perf thresholds exceeded:")
+        header = "Perf warnings (non-fatal):" if args.warn_only else "Perf thresholds exceeded:"
+        print(header)
         for failure in failures:
             print(f"- {failure}")
-        return 1
+        if not args.warn_only:
+            return 1
 
     print("Perf summary:")
     print(json.dumps(summary, indent=2))

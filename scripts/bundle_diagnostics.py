@@ -10,9 +10,7 @@ from dem2dsf.diagnostics import bundle_diagnostics, default_profile_dir
 
 def main() -> int:
     """CLI entrypoint for bundling diagnostics."""
-    parser = argparse.ArgumentParser(
-        description="Bundle dem2dsf build reports and metrics."
-    )
+    parser = argparse.ArgumentParser(description="Bundle dem2dsf build reports and metrics.")
     parser.add_argument(
         "--build-dir",
         default="build",

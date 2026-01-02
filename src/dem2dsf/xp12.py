@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 import shutil
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
@@ -125,7 +126,9 @@ def _extract_raster_blocks(text: str) -> dict[str, RasterBlock]:
                 continue
             block = blocks.get(index)
             if block:
-                block["lines"].append(raw_line)
+                lines = block.get("lines")
+                if isinstance(lines, list):
+                    lines.append(raw_line)
     results: dict[str, RasterBlock] = {}
     for index in ordered:
         block = blocks.get(index)
@@ -185,9 +188,7 @@ def _copy_raw_sidecars(
         return
     missing_tokens = {name.lower() for name in missing_names}
     matched = [
-        path
-        for path in sidecars
-        if any(token in path.name.lower() for token in missing_tokens)
+        path for path in sidecars if any(token in path.name.lower() for token in missing_tokens)
     ]
     candidates = matched or sidecars
     for src in candidates:
@@ -216,9 +217,7 @@ def summarize_rasters(names: Iterable[str]) -> RasterSummary:
         any(token in name.lower() for token in _SOUND_TOKENS) for name in normalized
     )
     season_rasters = [
-        name
-        for name in normalized
-        if any(token in name.lower() for token in _SEASON_TOKENS)
+        name for name in normalized if any(token in name.lower() for token in _SEASON_TOKENS)
     ]
     return RasterSummary(
         raster_names=tuple(normalized),
@@ -228,7 +227,7 @@ def summarize_rasters(names: Iterable[str]) -> RasterSummary:
 
 
 def inventory_dsf_rasters(
-    dsftool_path: Path,
+    dsftool_cmd: Sequence[str] | Path | str,
     dsf_path: Path,
     work_dir: Path,
     *,
@@ -239,11 +238,11 @@ def inventory_dsf_rasters(
     work_dir.mkdir(parents=True, exist_ok=True)
     text_path = work_dir / f"{dsf_path.stem}.txt"
 
-    hint = dsftool_7z_hint(dsftool_path, dsf_path)
+    hint = dsftool_7z_hint(dsftool_cmd, dsf_path)
     if hint and "cannot read" in hint:
         raise RuntimeError(f"DSFTool dsf2text failed: {hint}")
     result = run_dsftool(
-        dsftool_path,
+        dsftool_cmd,
         ["--dsf2text", str(dsf_path), str(text_path)],
         timeout=timeout,
         retries=retries,
@@ -260,7 +259,7 @@ def inventory_dsf_rasters(
 
 
 def enrich_dsf_rasters(
-    dsftool_path: Path,
+    dsftool_cmd: Sequence[str] | Path | str,
     dsf_path: Path,
     global_dsf_path: Path,
     work_dir: Path,
@@ -275,7 +274,7 @@ def enrich_dsf_rasters(
     enriched_text_path = work_dir / f"{dsf_path.stem}.enriched.txt"
     enriched_dsf_path = work_dir / f"{dsf_path.stem}.enriched.dsf"
 
-    target_hint = dsftool_7z_hint(dsftool_path, dsf_path)
+    target_hint = dsftool_7z_hint(dsftool_cmd, dsf_path)
     if target_hint and "cannot read" in target_hint:
         return EnrichmentResult(
             status="failed",
@@ -286,7 +285,7 @@ def enrich_dsf_rasters(
             error=f"DSFTool dsf2text failed: {target_hint}",
         )
     result = run_dsftool(
-        dsftool_path,
+        dsftool_cmd,
         ["--dsf2text", str(dsf_path), str(target_text_path)],
         timeout=timeout,
         retries=retries,
@@ -304,7 +303,7 @@ def enrich_dsf_rasters(
             error=f"DSFTool dsf2text failed: {message}",
         )
 
-    global_hint = dsftool_7z_hint(dsftool_path, global_dsf_path)
+    global_hint = dsftool_7z_hint(dsftool_cmd, global_dsf_path)
     if global_hint and "cannot read" in global_hint:
         return EnrichmentResult(
             status="failed",
@@ -315,7 +314,7 @@ def enrich_dsf_rasters(
             error=f"DSFTool dsf2text failed: {global_hint}",
         )
     result = run_dsftool(
-        dsftool_path,
+        dsftool_cmd,
         ["--dsf2text", str(global_dsf_path), str(global_text_path)],
         timeout=timeout,
         retries=retries,
@@ -372,11 +371,7 @@ def enrich_dsf_rasters(
         ]
         if property_indices:
             insert_at = property_indices[-1] + 1
-    bound_indices = [
-        index
-        for index, line in enumerate(target_lines)
-        if _is_bound_property(line)
-    ]
+    bound_indices = [index for index, line in enumerate(target_lines) if _is_bound_property(line)]
     if bound_indices:
         insert_at = min(insert_at, min(bound_indices))
 
@@ -403,7 +398,7 @@ def enrich_dsf_rasters(
     )
 
     result = run_dsftool(
-        dsftool_path,
+        dsftool_cmd,
         ["--text2dsf", str(enriched_text_path), str(enriched_dsf_path)],
         timeout=timeout,
         retries=retries,

@@ -5,12 +5,14 @@ from pathlib import Path
 import numpy as np
 import pytest
 import rasterio
+from pyproj import Transformer
 from rasterio.transform import from_bounds
 from rasterio.warp import transform_bounds
 
 from dem2dsf.dem.tiling import (
     iter_tile_paths,
     tile_bounds,
+    tile_bounds_in_crs,
     tile_name,
     tiles_for_bounds,
     write_tile_dem,
@@ -75,6 +77,33 @@ def test_write_tile_dem_projected_bounds(tmp_path) -> None:
         out_bounds = dataset.bounds
     for actual, expected in zip(out_bounds, bounds_3857):
         assert actual == pytest.approx(expected, rel=1e-4, abs=1e-1)
+
+
+def test_tile_bounds_in_crs_always_xy() -> None:
+    bounds = tile_bounds("+47+008")
+    crs = rasterio.CRS.from_epsg(25832)
+
+    transformer = Transformer.from_crs("EPSG:4326", "EPSG:25832", always_xy=True)
+    xs = []
+    ys = []
+    steps = 23
+    for index in range(steps):
+        t = index / (steps - 1)
+        x = bounds[0] + (bounds[2] - bounds[0]) * t
+        xs.extend([x, x])
+        ys.extend([bounds[1], bounds[3]])
+    for index in range(steps):
+        t = index / (steps - 1)
+        y = bounds[1] + (bounds[3] - bounds[1]) * t
+        ys.extend([y, y])
+        xs.extend([bounds[0], bounds[2]])
+
+    out_xs, out_ys = transformer.transform(xs, ys)
+    expected = (min(out_xs), min(out_ys), max(out_xs), max(out_ys))
+    result = tile_bounds_in_crs("+47+008", crs)
+
+    for actual, exp in zip(result, expected):
+        assert actual == pytest.approx(exp, rel=1e-6, abs=1e-2)
 
 
 def test_write_tile_dem_requires_crs(tmp_path) -> None:

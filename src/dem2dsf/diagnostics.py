@@ -11,6 +11,7 @@ DEFAULT_REPORTS = ("build_report.json", "build_plan.json")
 
 
 def _collect_report_files(build_dir: Path) -> list[Path]:
+    """Collect build report and plan JSON files."""
     files = []
     for name in DEFAULT_REPORTS:
         candidate = build_dir / name
@@ -20,6 +21,7 @@ def _collect_report_files(build_dir: Path) -> list[Path]:
 
 
 def _collect_metrics(build_dir: Path) -> list[Path]:
+    """Collect metrics JSON files under a build directory."""
     matches: list[Path] = []
     for pattern in ("metrics.json", "*.metrics.json"):
         matches.extend(build_dir.rglob(pattern))
@@ -27,6 +29,7 @@ def _collect_metrics(build_dir: Path) -> list[Path]:
 
 
 def _collect_logs(build_dir: Path) -> list[Path]:
+    """Collect runner logs and event JSON files."""
     log_dir = build_dir / "runner_logs"
     if not log_dir.exists():
         return []
@@ -36,6 +39,7 @@ def _collect_logs(build_dir: Path) -> list[Path]:
 
 
 def _collect_profiles(profile_dir: Path) -> list[Path]:
+    """Collect profiling artifacts from a profile directory."""
     if not profile_dir.exists():
         return []
     results: list[Path] = []
@@ -45,6 +49,7 @@ def _collect_profiles(profile_dir: Path) -> list[Path]:
 
 
 def _unique(paths: list[Path], *, exclude: Path | None = None) -> list[Path]:
+    """Deduplicate paths while preserving order and skipping missing files."""
     seen: set[Path] = set()
     unique: list[Path] = []
     for path in paths:
@@ -61,6 +66,7 @@ def _unique(paths: list[Path], *, exclude: Path | None = None) -> list[Path]:
 
 
 def _arcname(path: Path, *, build_dir: Path, profile_dir: Path) -> str:
+    """Return the archive name for a diagnostics bundle entry."""
     try:
         return path.relative_to(build_dir).as_posix()
     except ValueError:
@@ -106,9 +112,7 @@ def bundle_diagnostics(
     if include_logs:
         paths.extend(_collect_logs(build_dir))
 
-    resolved_profile_dir = (
-        profile_dir.expanduser() if profile_dir else default_profile_dir()
-    )
+    resolved_profile_dir = profile_dir.expanduser() if profile_dir else default_profile_dir()
     if include_profiles:
         paths.extend(_collect_profiles(resolved_profile_dir))
 

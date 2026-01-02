@@ -133,6 +133,8 @@ For each X‑Plane tile, the pipeline produces a **normalized DEM** artifact tha
 
 **GDAL axis order safety**
 Starting with GDAL 3.0, authority axis order may be honored by default (lat/long) for EPSG:4326, which can break code that assumes long/lat. We must enforce a consistent axis order strategy in our transform/warp code paths.
+- Use explicit always_xy transforms for all bounds calculations (prefer the shared CRS helper).
+- Regression test: pick a projected CRS (for example EPSG:25832) and assert tile bounds transforms match a Transformer(always_xy=True) reference.
 
 ### 5.3 Extent policy: input does NOT need to match 1×1 tiles
 **Input DEM can be:**
@@ -290,7 +292,42 @@ AutoOrtho is a texture streaming layer that expects Ortho4XP-style texture namin
 
 ---
 
-## 13. Python dependencies (implementation guidance)
+## 12. Provenance and determinism
+
+We distinguish deterministic artifacts (mesh outputs) from deterministic metadata (timestamps, performance timings, file mtimes).
+
+- `--provenance-level {basic,strict}` controls input fingerprints: basic records size+mtime, strict adds SHA-256 and toolchain version probes.
+- `--stable-metadata` omits `created_at` in build_plan/build_report; other fields may still vary.
+- Build plan/report include a `provenance` block for inputs, toolchain, environment versions, coverage summary, and pinned-version drift.
+
+---
+
+## 13. Tool command semantics
+
+- Tool invocation flags (`--runner`, `--dsftool`) are **command lists**, not single-path strings.
+- Preserve the full token list end-to-end, including wrapper prefixes (Wine, env, conda, etc.).
+- If the final token is a `.py` script and no Python interpreter is present in the prefix, inject the current Python executable.
+- Quoting expectations:
+  - POSIX shells: quote paths with spaces; pass each token as its own CLI argument.
+  - Windows shells (PowerShell/cmd): quote paths with spaces; wrappers are additional tokens.
+
+Examples:
+
+```shell
+# POSIX
+dem2dsf build --dem dem.tif --tile +47+008 \
+  --runner python scripts/ortho4xp_runner.py \
+  --dsftool wine /path/to/DSFTool.exe
+
+# Windows (PowerShell)
+dem2dsf build --dem dem.tif --tile +47+008 `
+  --runner python scripts/ortho4xp_runner.py `
+  --dsftool "C:\Program Files\XPTools\DSFTool.exe"
+```
+
+---
+
+## 14. Python dependencies (implementation guidance)
 
 ### 13.1 Must-have
 - `rasterio` + GDAL backend
@@ -307,7 +344,7 @@ AutoOrtho is a texture streaming layer that expects Ortho4XP-style texture namin
 
 ---
 
-## 14. Milestones (high level)
+## 15. Milestones (high level)
 
 - **M0**: reference harvest + backend contracts  
 - **M1**: DEM normalization (mosaic/reproject/resample/tile/fill) + Ortho4XP backend build  
@@ -318,7 +355,7 @@ AutoOrtho is a texture streaming layer that expects Ortho4XP-style texture namin
 
 ---
 
-## 15. References (harvest targets)
+## 16. References (harvest targets)
 
 > URLs are provided in code formatting so they can be copied directly.
 

@@ -25,6 +25,7 @@ def test_publish_build(tmp_path: Path) -> None:
 
     assert Path(result["zip_path"]).exists()
     manifest = json.loads((build_dir / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["publish_mode"] == "full"
     assert any(entry["path"].endswith("+47+008.dsf") for entry in manifest["files"])
     assert (build_dir / "audit_report.json").exists()
 
@@ -32,6 +33,28 @@ def test_publish_build(tmp_path: Path) -> None:
         names = archive.namelist()
         assert "manifest.json" in names
         assert "audit_report.json" in names
+
+
+def test_publish_build_scenery_mode_filters(tmp_path: Path) -> None:
+    build_dir = tmp_path / "build"
+    dsf_path = xplane_dsf_path(build_dir, "+47+008")
+    dsf_path.parent.mkdir(parents=True, exist_ok=True)
+    dsf_path.write_text("dsf", encoding="utf-8")
+    (build_dir / "build_plan.json").write_text("{}", encoding="utf-8")
+    (build_dir / "build_report.json").write_text("{}", encoding="utf-8")
+    logs_dir = build_dir / "runner_logs"
+    logs_dir.mkdir()
+    (logs_dir / "run.log").write_text("log", encoding="utf-8")
+
+    output_zip = tmp_path / "out.zip"
+    publish_build(build_dir, output_zip, mode="scenery")
+
+    with ZipFile(output_zip) as archive:
+        names = archive.namelist()
+        assert "build_plan.json" in names
+        assert "build_report.json" in names
+        assert str(dsf_path.relative_to(build_dir)).replace("\\", "/") in names
+        assert "runner_logs/run.log" not in names
 
 
 def test_publish_build_sevenzip_fallback(tmp_path: Path) -> None:

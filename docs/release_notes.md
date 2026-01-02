@@ -7,7 +7,7 @@ content matches the scope below.
 
 ### Highlights
 - Ortho4XP-first build pipeline with runner orchestration and tile staging.
-- XPTools validation support (DSFTool/DDSTool) plus XP12 raster checks.
+- XPTools validation support (DSFTool) plus XP12 raster checks.
 - Diagnostics bundles (reports, logs, metrics, profiles) for shareable triage.
 - Coverage thresholds/metrics and normalization cache reuse.
 - GUI launcher with persisted preferences and updated runner controls.
@@ -21,6 +21,7 @@ content matches the scope below.
 - `ultra` density preset and mosaic strategy selection (full vs per-tile).
 - Normalization cache reuse keyed by DEM inputs and parameters.
 - GUI preferences persistence plus expanded runner controls.
+- Publish modes (`--mode full` vs `--mode scenery`) for packaging essentials only.
 
 #### Changed
 - Ortho4XP config overrides restore by default; opt in to persist changes.
@@ -38,8 +39,9 @@ content matches the scope below.
 ### Tooling and distribution
 - Ortho4XP runner packaged as `dem2dsf-ortho4xp` console script.
 - GUI bundles for Windows/macOS/Linux via `scripts/build_gui.py`.
-- XPTools source build support via `scripts/build_xptools.py`.
+- XPTools zip install support via `scripts/install_tools.py`.
 
 ### Notes
 - Ortho4XP config overrides are restored by default; use persist config to keep them.
 - Integration tests that require external tools auto-skip when tools are missing.
+- Optional DDS validation via DDSTool (`--dds-validation`).

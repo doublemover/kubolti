@@ -4,7 +4,7 @@
   "title": "DEM2DSF Build Plan",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema_version", "created_at", "inputs", "tiles", "backend", "options"],
+  "required": ["schema_version", "inputs", "tiles", "backend", "options"],
   "properties": {
     "schema_version": {
       "type": "string",
@@ -58,6 +58,21 @@
     "notes": {
       "type": "array",
       "items": {"type": "string"}
+    },
+    "provenance": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "level": {"type": "string"},
+        "stable_metadata": {"type": "boolean"},
+        "inputs": {"type": "object", "additionalProperties": true},
+        "tools": {"type": "object", "additionalProperties": true},
+        "environment": {"type": "object", "additionalProperties": true},
+        "assumptions": {"type": "object", "additionalProperties": true},
+        "coverage": {"type": "object", "additionalProperties": true},
+        "pinned_versions": {"type": "object", "additionalProperties": true},
+        "version_drift": {"type": "object", "additionalProperties": true}
+      }
     }
   }
 }

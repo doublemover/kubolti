@@ -11,6 +11,11 @@ Backends provide mesh generation while adhering to shared build plan/report sche
 - Report tiles with explicit status (`ok`, `warning`, `error`, `skipped`).
 - Record backend name/version used for reproducibility.
 
+## Discovery
+Backends can be discovered via package entrypoints using the group
+`dem2dsf.backends`. Each entrypoint should resolve to a backend factory
+(callable) or a backend class. Built-in backends are always available.
+
 ## Validation
 - `dem2dsf.contracts.validate_build_plan` and `validate_build_report` are the canonical schema checks.
 - Contract tests in `tests/test_contracts.py` must pass for new backends.

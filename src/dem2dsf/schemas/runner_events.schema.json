@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Runner event payload",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "runner", "events"],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "1"
+    },
+    "runner": {
+      "type": "string",
+      "minLength": 1
+    },
+    "tile": {
+      "type": "string"
+    },
+    "attempt": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "events": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/event"}
+    }
+  },
+  "$defs": {
+    "event": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["event", "detail", "stream", "line"],
+      "properties": {
+        "event": {
+          "type": "string"
+        },
+        "detail": {
+          "type": "string"
+        },
+        "stream": {
+          "type": "string",
+          "enum": ["stdout", "stderr"]
+        },
+        "line": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "step": {
+          "type": "string"
+        }
+      }
+    }
+  }
+}

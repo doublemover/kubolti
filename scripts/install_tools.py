@@ -12,20 +12,16 @@ from pathlib import Path
 from dem2dsf.tools.config import ENV_TOOL_PATHS
 from dem2dsf.tools.installer import (
     InstallResult,
+    ensure_executable,
     ensure_sevenzip,
     ensure_tool_config,
+    find_ddstool,
     find_dsftool,
     find_ortho4xp,
     install_from_archive,
     install_from_url,
     install_ortho4xp,
     is_url,
-)
-from dem2dsf.tools.xptools_build import (
-    XPTOOLS_COMMIT,
-    XPTOOLS_REPO_URL,
-    XPTOOLS_TAG,
-    build_xptools,
 )
 
 DEFAULT_ORTHO4XP_URL = "https://github.com/oscarpilote/Ortho4XP.git"
@@ -34,6 +30,12 @@ DEFAULT_XPTOOLS_URLS = {
     "darwin": "https://files.x-plane.com/public/xptools/xptools_mac_24-5.zip",
     "linux": "https://files.x-plane.com/public/xptools/xptools_lin_24-5.zip",
 }
+
+
+def _dsftool_names() -> tuple[str, ...]:
+    if sys.platform.startswith("win"):
+        return ("DSFTool.exe", "DSFTool", "dsftool")
+    return ("DSFTool", "dsftool")
 
 
 def _default_xptools_url() -> str | None:
@@ -45,6 +47,13 @@ def _default_xptools_url() -> str | None:
     if sys.platform.startswith("linux"):
         return DEFAULT_XPTOOLS_URLS["linux"]
     return None
+
+
+def _xptools_search_dirs(install_root: Path) -> list[Path]:
+    return [
+        install_root / "xptools",
+        Path.home() / "XPTools",
+    ]
 
 
 def _prompt(prompt: str) -> str:
@@ -101,20 +110,16 @@ def _install_7zip(interactive: bool) -> bool:
             if (
                 not interactive
                 or _prompt(
-                    "Install 7-Zip via winget? "
-                    "(Requires administrator privileges/UAC.) [y/N]: "
+                    "Install 7-Zip via winget? (Requires administrator privileges/UAC.) [y/N]: "
                 ).lower()
                 == "y"
             ):
-                return _run_install_command(
-                    ["winget", "install", "-e", "--id", "7zip.7zip"]
-                )
+                return _run_install_command(["winget", "install", "-e", "--id", "7zip.7zip"])
         if _ensure_choco(interactive):
             if (
                 not interactive
                 or _prompt(
-                    "Install 7-Zip via choco? "
-                    "(Requires administrator privileges/UAC.) [y/N]: "
+                    "Install 7-Zip via choco? (Requires administrator privileges/UAC.) [y/N]: "
                 ).lower()
                 == "y"
             ):
@@ -125,9 +130,7 @@ def _install_7zip(interactive: bool) -> bool:
     else:
         if shutil.which("apt-get"):
             if not interactive or _prompt("Install 7-Zip via apt-get? [y/N]: ").lower() == "y":
-                return _run_install_command(
-                    ["sudo", "apt-get", "install", "-y", "p7zip-full"]
-                )
+                return _run_install_command(["sudo", "apt-get", "install", "-y", "p7zip-full"])
         if shutil.which("dnf"):
             if not interactive or _prompt("Install 7-Zip via dnf? [y/N]: ").lower() == "y":
                 return _run_install_command(["sudo", "dnf", "install", "-y", "p7zip"])
@@ -166,55 +169,33 @@ def _ensure_dsftool(
     url: str | None,
     archive: Path | None,
     install_root: Path,
-    prefer_source: bool,
-    allow_downloads: bool,
-    xptools_tag: str,
-    xptools_commit: str | None,
-    xptools_repo: str,
-    install_deps: bool,
     interactive: bool,
     skip_install: bool,
 ) -> InstallResult:
     """Locate or install DSFTool from URL or archive."""
     found = find_dsftool(search_dirs)
     if found:
+        ensure_executable(found)
         return InstallResult("dsftool", "ok", found, "found")
     if skip_install:
         return InstallResult("dsftool", "missing", None, "not found")
-    if prefer_source:
-        try:
-            built = build_xptools(
-                source_dir=install_root / "xptools-src",
-                install_dir=install_root / "xptools",
-                repo_url=xptools_repo,
-                tag=xptools_tag,
-                commit=xptools_commit,
-                install_deps=install_deps,
-                interactive=interactive,
-            )
-            for tool in built:
-                if tool.name == "dsftool":
-                    return InstallResult("dsftool", "ok", tool.path, "built from source")
-        except Exception as exc:
-            if not allow_downloads:
-                return InstallResult("dsftool", "error", None, str(exc))
     install_dir = install_root / "xptools"
-    if allow_downloads and url:
+    if url:
         try:
             found = install_from_url(
                 url,
                 install_dir,
-                executable_names=("DSFTool.exe", "DSFTool", "dsftool"),
+                executable_names=_dsftool_names(),
             )
             return InstallResult("dsftool", "ok", found, f"downloaded from {url}")
         except Exception as exc:
             return InstallResult("dsftool", "error", None, str(exc))
-    if allow_downloads and archive:
+    if archive:
         try:
             found = install_from_archive(
                 archive,
                 install_dir,
-                executable_names=("DSFTool.exe", "DSFTool", "dsftool"),
+                executable_names=_dsftool_names(),
             )
             return InstallResult("dsftool", "ok", found, f"installed from {archive}")
         except Exception as exc:
@@ -227,12 +208,6 @@ def _ensure_dsftool(
                 url=response,
                 archive=None,
                 install_root=install_root,
-                prefer_source=prefer_source,
-                allow_downloads=allow_downloads,
-                xptools_tag=xptools_tag,
-                xptools_commit=xptools_commit,
-                xptools_repo=xptools_repo,
-                install_deps=install_deps,
                 interactive=False,
                 skip_install=False,
             )
@@ -243,16 +218,11 @@ def _ensure_dsftool(
                 url=None,
                 archive=archive_path,
                 install_root=install_root,
-                prefer_source=prefer_source,
-                allow_downloads=allow_downloads,
-                xptools_tag=xptools_tag,
-                xptools_commit=xptools_commit,
-                xptools_repo=xptools_repo,
-                install_deps=install_deps,
                 interactive=False,
                 skip_install=False,
             )
     return InstallResult("dsftool", "missing", None, "not installed")
+
 
 def _ensure_ortho4xp(
     search_dirs: list[Path],
@@ -279,9 +249,7 @@ def _ensure_ortho4xp(
             if existing:
                 found = find_ortho4xp([existing])
                 if found:
-                    return InstallResult(
-                        "ortho4xp", "ok", found, f"using {existing}"
-                    )
+                    return InstallResult("ortho4xp", "ok", found, f"using {existing}")
         return InstallResult("ortho4xp", "error", None, str(exc))
 
 
@@ -294,7 +262,7 @@ def main() -> int:
     )
     parser.add_argument(
         "--tools",
-        default="7zip,ortho4xp,dsftool",
+        default="7zip,ortho4xp,dsftool,ddstool",
         help="Comma-separated tool list to install.",
     )
     parser.add_argument(
@@ -307,37 +275,7 @@ def main() -> int:
         default=_default_xptools_url(),
         help="XPTools archive URL (DSFTool).",
     )
-    parser.add_argument(
-        "--xptools-repo",
-        default=XPTOOLS_REPO_URL,
-        help="X-Plane/xptools git repo URL.",
-    )
-    parser.add_argument(
-        "--xptools-tag",
-        default=XPTOOLS_TAG,
-        help="Git tag for DSFTool/DDSTool builds.",
-    )
-    parser.add_argument(
-        "--xptools-commit",
-        default=XPTOOLS_COMMIT,
-        help="Optional pinned commit SHA for the xptools tag (omit to use tag only).",
-    )
     parser.add_argument("--xptools-archive", help="Local XPTools archive path.")
-    parser.add_argument(
-        "--no-source",
-        action="store_true",
-        help="Disable source builds and use downloads only.",
-    )
-    parser.add_argument(
-        "--allow-downloads",
-        action="store_true",
-        help="Allow fallback to zip/archive downloads.",
-    )
-    parser.add_argument(
-        "--install-deps",
-        action="store_true",
-        help="Attempt to install build dependencies for source builds.",
-    )
     parser.add_argument(
         "--non-interactive",
         action="store_true",
@@ -360,36 +298,26 @@ def main() -> int:
 
     tools = {tool.strip().lower() for tool in args.tools.split(",") if tool.strip()}
     interactive = not args.non_interactive
-    prefer_source = not args.no_source
-    allow_downloads = args.allow_downloads or not prefer_source
     archive_path = _resolve_archive(args.xptools_archive or "")
     url_value = args.xptools_url or ""
 
     print(f"Install root: {install_root}")
     print(f"Tools requested: {', '.join(sorted(tools)) or 'none'}")
-    print(
-        "Mode: "
-        f"{'source build' if prefer_source else 'downloads only'}, "
-        f"{'downloads allowed' if allow_downloads else 'downloads disabled'}, "
-        f"{'interactive' if interactive else 'non-interactive'}"
-    )
+    print(f"Mode: downloads only, {'interactive' if interactive else 'non-interactive'}")
     if args.check_only:
         print("Check-only: will not install missing tools.")
-    if args.no_source and args.install_deps:
-        print("Note: --install-deps ignored because --no-source is set.")
     if url_value and not is_url(url_value):
         print(f"Note: --xptools-url ignored (not a URL): {url_value}")
     if args.xptools_archive and not archive_path:
         print(f"Note: --xptools-archive not found: {args.xptools_archive}")
-    if not allow_downloads and (url_value or archive_path):
-        print("Note: XPTools downloads are disabled; URL/archive will be ignored.")
 
     search_dirs = [
-        install_root / "ortho4xp",
         install_root / "xptools",
+        install_root / "ortho4xp",
         Path.home() / "Ortho4XP",
         Path.home() / "XPTools",
     ]
+    xptools_dirs = _xptools_search_dirs(install_root)
 
     results: list[InstallResult] = []
     tool_paths: dict[str, Path] = {}
@@ -417,24 +345,26 @@ def main() -> int:
             tool_paths["ortho4xp"] = results[-1].path
 
     if "dsftool" in tools or "xptools" in tools:
-        results.append(
-            _ensure_dsftool(
-                search_dirs,
-                url=_resolve_url(url_value),
-                archive=archive_path,
-                install_root=install_root,
-                prefer_source=prefer_source,
-                allow_downloads=allow_downloads,
-                xptools_tag=args.xptools_tag,
-                xptools_commit=args.xptools_commit,
-                xptools_repo=args.xptools_repo,
-                install_deps=args.install_deps,
-                interactive=interactive,
-                skip_install=args.check_only,
-            )
+        dsftool_result = _ensure_dsftool(
+            xptools_dirs,
+            url=_resolve_url(url_value),
+            archive=archive_path,
+            install_root=install_root,
+            interactive=interactive,
+            skip_install=args.check_only,
         )
-        if results[-1].path:
-            tool_paths["dsftool"] = results[-1].path
+        results.append(dsftool_result)
+        if dsftool_result.path:
+            ensure_executable(dsftool_result.path)
+            tool_paths["dsftool"] = dsftool_result.path
+        if "ddstool" in tools or "xptools" in tools or "dsftool" in tools:
+            ddstool_path = find_ddstool(xptools_dirs)
+            if ddstool_path:
+                ensure_executable(ddstool_path)
+                results.append(InstallResult("ddstool", "ok", ddstool_path, "found"))
+                tool_paths["ddstool"] = ddstool_path
+            else:
+                results.append(InstallResult("ddstool", "missing", None, "not found"))
 
     for result in results:
         path = str(result.path) if result.path else "-"

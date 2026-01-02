@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import ExitStack
@@ -17,7 +18,10 @@ from rasterio.features import geometry_mask
 from rasterio.merge import merge
 
 from dem2dsf.dem.adapter import BackendProfile, apply_backend_profile
+from dem2dsf.dem.aoi import load_aoi, load_aoi_shapes, reproject_shapes
+from dem2dsf.dem.crs import normalize_crs
 from dem2dsf.dem.fill import (
+    FillResult,
     fill_with_constant,
     fill_with_fallback,
     fill_with_interpolation,
@@ -25,7 +29,7 @@ from dem2dsf.dem.fill import (
 from dem2dsf.dem.info import inspect_dem
 from dem2dsf.dem.models import CoverageMetrics, DemInfo, TileResult
 from dem2dsf.dem.mosaic import build_mosaic
-from dem2dsf.dem.stack import DemStack, load_aoi_shapes
+from dem2dsf.dem.stack import DemStack
 from dem2dsf.dem.tiling import tile_bounds, tile_bounds_in_crs, write_tile_dem
 from dem2dsf.dem.warp import warp_dem
 
@@ -86,6 +90,7 @@ def _run_tile_jobs(
     *,
     continue_on_error: bool,
 ) -> list[TileWorkResult]:
+    """Run per-tile workers serially or via a thread pool."""
     results: dict[str, TileWorkResult] = {}
     if tile_jobs == 1 or len(tiles) <= 1:
         for tile in tiles:
@@ -110,9 +115,19 @@ def _run_tile_jobs(
     return [results[tile] for tile in tiles]
 
 
-def _apply_aoi_mask(tile_path: Path, shapes: list[dict[str, object]], nodata: float) -> None:
+LOGGER = logging.getLogger("dem2dsf.dem.pipeline")
+
+
+def _apply_aoi_mask(
+    tile_path: Path,
+    shapes: list[dict[str, object]],
+    nodata: float | None = None,
+) -> None:
     """Apply an AOI mask to a tile, setting masked pixels to nodata."""
     with rasterio.open(tile_path, "r+") as dataset:
+        nodata_value = nodata if nodata is not None else dataset.nodata
+        if nodata_value is None:
+            raise ValueError("AOI mask requires a nodata value.")
         data = dataset.read(1)
         mask = geometry_mask(
             shapes,
@@ -123,7 +138,7 @@ def _apply_aoi_mask(tile_path: Path, shapes: list[dict[str, object]], nodata: fl
         if not mask.any():
             return
         data = data.copy()
-        data[mask] = nodata
+        data[mask] = nodata_value
         dataset.write(data, 1)
 
 
@@ -135,6 +150,7 @@ def _merge_sources_for_tile(
     resolution: tuple[float, float] | None,
     resampling: Resampling,
     dst_nodata: float | None,
+    compression: str | None = None,
 ) -> TileResult:
     """Merge sources for a tile directly into a GeoTIFF."""
     source_paths = list(sources)
@@ -148,27 +164,19 @@ def _merge_sources_for_tile(
         bounds = tile_bounds_in_crs(tile, base.crs)
         res = resolution or (abs(base.res[0]), abs(base.res[1]))
         nodata = dst_nodata if dst_nodata is not None else base.nodata
-        mosaic, transform = merge(
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        dst_kwds = {"driver": "GTiff", "nodata": nodata}
+        if compression:
+            dst_kwds["compress"] = compression
+        merge(
             datasets,
             bounds=bounds,
             res=res,
             nodata=nodata,
             resampling=resampling,
+            dst_path=output_path,
+            dst_kwds=dst_kwds,
         )
-        meta = base.meta.copy()
-        meta.update(
-            {
-                "driver": "GTiff",
-                "height": mosaic.shape[1],
-                "width": mosaic.shape[2],
-                "transform": transform,
-                "crs": base.crs,
-                "nodata": nodata,
-            }
-        )
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        with rasterio.open(output_path, "w", **meta) as dest:
-            dest.write(mosaic)
     return TileResult(
         tile=tile,
         path=output_path,
@@ -209,13 +217,16 @@ def _coverage_stats(path: Path, nodata_override: float | None) -> tuple[int, int
             use_data = True
         elif dataset.nodata is None or dataset.nodata != nodata:
             use_data = True
+        nodata_pixels = 0
         if use_data:
-            data = dataset.read(1)
-            mask = _nodata_mask(data, nodata)
-            nodata_pixels = int(mask.sum())
+            for _, window in dataset.block_windows(1):
+                data = dataset.read(1, window=window)
+                mask = _nodata_mask(data, nodata)
+                nodata_pixels += int(mask.sum())
         else:
-            mask = dataset.read_masks(1)
-            nodata_pixels = int((mask == 0).sum())
+            for _, window in dataset.block_windows(1):
+                mask = dataset.read_masks(1, window=window)
+                nodata_pixels += int((mask == 0).sum())
     coverage = 1.0 if total == 0 else (total - nodata_pixels) / total
     return total, nodata_pixels, coverage
 
@@ -227,17 +238,15 @@ def _apply_fill_strategy(
     nodata: float | None,
     fill_value: float,
     fallback_path: Path | None,
-) -> int:
-    """Apply a fill strategy to a tile and return filled pixel count."""
+) -> FillResult | None:
+    """Apply a fill strategy to a tile and return fill details."""
     if strategy == "none":
-        return 0
+        return None
     with rasterio.open(tile_path, "r+") as dataset:
         band = dataset.read(1)
         nodata_value = nodata if nodata is not None else dataset.nodata
         if strategy == "constant":
-            result = fill_with_constant(
-                band, nodata=nodata_value, fill_value=fill_value
-            )
+            result = fill_with_constant(band, nodata=nodata_value, fill_value=fill_value)
         elif strategy == "interpolate":
             result = fill_with_interpolation(band, nodata=nodata_value)
         elif strategy == "fallback":
@@ -253,7 +262,7 @@ def _apply_fill_strategy(
         else:
             raise ValueError(f"Unknown fill strategy: {strategy}")
         dataset.write(result.filled, 1)
-        return result.filled_pixels
+        return result
 
 
 def _prepare_sources(
@@ -305,6 +314,9 @@ def normalize_for_tiles(
     continue_on_error: bool = False,
     coverage_metrics: bool = True,
     mosaic_strategy: str = "full",
+    aoi_path: Path | None = None,
+    aoi_crs: str | None = None,
+    compression: str | None = None,
 ) -> NormalizationResult:
     """Normalize DEM inputs into per-tile artifacts."""
     dem_paths = tuple(dem_paths)
@@ -312,12 +324,15 @@ def normalize_for_tiles(
     if not dem_paths:
         raise ValueError("At least one DEM path is required.")
     tile_jobs = _coerce_tile_jobs(tile_jobs, len(tiles))
-    if mosaic_strategy not in {"full", "per-tile"}:
-        raise ValueError("mosaic_strategy must be 'full' or 'per-tile'")
+    if mosaic_strategy not in {"full", "per-tile", "vrt"}:
+        raise ValueError("mosaic_strategy must be 'full', 'per-tile', or 'vrt'")
 
     effective_nodata = dst_nodata
-    if effective_nodata is None and backend_profile and backend_profile.nodata is not None:
-        effective_nodata = backend_profile.nodata
+    if backend_profile:
+        if normalize_crs(target_crs) != normalize_crs(backend_profile.crs):
+            raise ValueError("Target CRS must match backend profile.")
+        if backend_profile.nodata is not None:
+            effective_nodata = backend_profile.nodata
 
     warped_paths = _prepare_sources(
         dem_paths,
@@ -329,11 +344,26 @@ def normalize_for_tiles(
         label="primary",
     )
 
+    aoi_shapes: list[dict[str, object]] | None = None
+    if aoi_path:
+        aoi_data = load_aoi(aoi_path, crs=aoi_crs)
+        for warning in aoi_data.warnings:
+            LOGGER.warning("%s", warning)
+        aoi_shapes = reproject_shapes(aoi_data.shapes, aoi_data.crs, target_crs)
+
     primary_sources = warped_paths
-    if len(warped_paths) > 1 and mosaic_strategy == "full":
-        mosaic_path = work_dir / "mosaic" / "mosaic.tif"
-        build_mosaic(warped_paths, mosaic_path)
+    if len(warped_paths) > 1 and mosaic_strategy in {"full", "vrt"}:
+        suffix = "vrt" if mosaic_strategy == "vrt" else "tif"
+        mosaic_path = work_dir / "mosaic" / f"mosaic.{suffix}"
+        build_mosaic(
+            warped_paths,
+            mosaic_path,
+            driver="VRT" if mosaic_strategy == "vrt" else "GTiff",
+            compression=compression,
+        )
     else:
+        if not warped_paths:
+            raise ValueError("No DEM sources available after warping.")
         mosaic_path = warped_paths[0]
 
     fallback_paths: tuple[Path, ...] = tuple(fallback_dem_paths or [])
@@ -352,44 +382,52 @@ def normalize_for_tiles(
             label="fallback",
         )
         fallback_sources = fallback_warped
-        if len(fallback_warped) > 1 and mosaic_strategy == "full":
-            fallback_mosaic = work_dir / "mosaic" / "fallback.tif"
-            build_mosaic(fallback_warped, fallback_mosaic)
+        if len(fallback_warped) > 1 and mosaic_strategy in {"full", "vrt"}:
+            suffix = "vrt" if mosaic_strategy == "vrt" else "tif"
+            fallback_mosaic = work_dir / "mosaic" / f"fallback.{suffix}"
+            build_mosaic(
+                fallback_warped,
+                fallback_mosaic,
+                driver="VRT" if mosaic_strategy == "vrt" else "GTiff",
+                compression=compression,
+            )
         elif len(fallback_warped) == 1:
             fallback_mosaic = fallback_warped[0]
 
     tile_results = []
     tile_dir = work_dir / "tiles"
-    raw_tile_dir = work_dir / "tiles_raw" if backend_profile else tile_dir
     coverage: dict[str, CoverageMetrics] = {}
 
     def process_tile(tile: str) -> tuple[TileResult, CoverageMetrics]:
+        """Normalize a single tile and return coverage metrics."""
         start_time = perf_counter()
-        raw_path = raw_tile_dir / tile / f"{tile}.tif"
+        output_path = tile_dir / tile / f"{tile}.tif"
         if mosaic_strategy == "per-tile" and len(primary_sources) > 1:
             tile_result = _merge_sources_for_tile(
                 primary_sources,
                 tile,
-                raw_path,
+                output_path,
                 resolution=resolution,
                 resampling=_resampling(resampling),
                 dst_nodata=effective_nodata,
+                compression=compression,
             )
         else:
             tile_result = write_tile_dem(
                 mosaic_path,
                 tile,
-                raw_path,
+                output_path,
                 resolution=resolution,
                 resampling=_resampling(resampling),
                 dst_nodata=effective_nodata,
+                compression=compression,
             )
         total_pixels = 0
         nodata_before = 0
         coverage_before = 1.0
         if coverage_metrics or fill_strategy == "fallback":
             total_pixels, nodata_before, coverage_before = _coverage_stats(
-                raw_path, effective_nodata
+                output_path, effective_nodata
             )
 
         fallback_tile = None
@@ -403,6 +441,7 @@ def normalize_for_tiles(
                     resolution=resolution,
                     resampling=_resampling(resampling),
                     dst_nodata=effective_nodata,
+                    compression=compression,
                 )
             elif fallback_sources:
                 if mosaic_strategy == "per-tile" and len(fallback_sources) > 1:
@@ -413,40 +452,53 @@ def normalize_for_tiles(
                         resolution=resolution,
                         resampling=_resampling(resampling),
                         dst_nodata=effective_nodata,
+                        compression=compression,
                     )
                 else:
+                    if not fallback_sources:
+                        raise ValueError("Fallback sources missing for fill.")
+                    fallback_first = next(iter(fallback_sources))
                     write_tile_dem(
-                        fallback_sources[0],
+                        fallback_first,
                         tile,
                         fallback_tile,
                         resolution=resolution,
                         resampling=_resampling(resampling),
                         dst_nodata=effective_nodata,
+                        compression=compression,
                     )
 
-        filled_pixels = 0
+        fill_result = None
         if fill_strategy != "fallback" or nodata_before > 0:
-            filled_pixels = _apply_fill_strategy(
-                raw_path,
+            fill_result = _apply_fill_strategy(
+                output_path,
                 strategy=fill_strategy,
                 nodata=effective_nodata,
                 fill_value=fill_value,
                 fallback_path=fallback_tile,
             )
 
-        final_path = raw_path
+        filled_pixels = fill_result.filled_pixels if fill_result else 0
+        final_path = output_path
         if backend_profile:
             final_path = tile_dir / tile / f"{tile}.tif"
-            apply_backend_profile(raw_path, final_path, backend_profile)
+            apply_backend_profile(output_path, final_path, backend_profile)
+        if aoi_shapes:
+            _apply_aoi_mask(final_path, aoi_shapes)
 
         if coverage_metrics:
-            total_after, nodata_after, coverage_after = _coverage_stats(
-                final_path, None
-            )
+            nodata_after = fill_result.nodata_pixels_after if fill_result else nodata_before
+            total_after = total_pixels
+            coverage_after = coverage_before if total_pixels else 1.0
+            if total_pixels:
+                coverage_after = (total_pixels - nodata_after) / total_pixels
         else:
             total_after = total_pixels
             nodata_after = max(0, nodata_before - filled_pixels)
             coverage_after = coverage_before if total_pixels else 1.0
+
+        if backend_profile and backend_profile.require_full_coverage and nodata_after > 0:
+            raise ValueError("Backend profile requires void-free DEMs.")
         metrics = CoverageMetrics(
             total_pixels=total_pixels or total_after,
             nodata_pixels_before=nodata_before,
@@ -510,6 +562,9 @@ def normalize_stack_for_tiles(
     continue_on_error: bool = False,
     coverage_metrics: bool = True,
     mosaic_strategy: str = "full",
+    aoi_path: Path | None = None,
+    aoi_crs: str | None = None,
+    compression: str | None = None,
 ) -> NormalizationResult:
     """Normalize a DEM stack into per-tile artifacts."""
     layers = stack.sorted_layers()
@@ -517,10 +572,15 @@ def normalize_stack_for_tiles(
         raise ValueError("DEM stack requires at least one layer.")
     tiles = list(tiles)
     tile_jobs = _coerce_tile_jobs(tile_jobs, len(tiles))
+    if mosaic_strategy not in {"full", "per-tile", "vrt"}:
+        raise ValueError("mosaic_strategy must be 'full', 'per-tile', or 'vrt'")
 
     effective_nodata = dst_nodata
-    if effective_nodata is None and backend_profile and backend_profile.nodata is not None:
-        effective_nodata = backend_profile.nodata
+    if backend_profile:
+        if normalize_crs(target_crs) != normalize_crs(backend_profile.crs):
+            raise ValueError("Target CRS must match backend profile.")
+        if backend_profile.nodata is not None:
+            effective_nodata = backend_profile.nodata
     if effective_nodata is None:
         for layer in layers:
             if layer.nodata is not None:
@@ -557,9 +617,15 @@ def normalize_stack_for_tiles(
             label="fallback",
         )
         fallback_sources = fallback_warped
-        if len(fallback_warped) > 1 and mosaic_strategy == "full":
-            fallback_mosaic = work_dir / "mosaic" / "fallback.tif"
-            build_mosaic(fallback_warped, fallback_mosaic)
+        if len(fallback_warped) > 1 and mosaic_strategy in {"full", "vrt"}:
+            suffix = "vrt" if mosaic_strategy == "vrt" else "tif"
+            fallback_mosaic = work_dir / "mosaic" / f"fallback.{suffix}"
+            build_mosaic(
+                fallback_warped,
+                fallback_mosaic,
+                driver="VRT" if mosaic_strategy == "vrt" else "GTiff",
+                compression=compression,
+            )
         elif len(fallback_warped) == 1:
             fallback_mosaic = fallback_warped[0]
 
@@ -568,19 +634,24 @@ def normalize_stack_for_tiles(
         if aoi and aoi not in aoi_shapes:
             aoi_shapes[aoi] = load_aoi_shapes(aoi)
 
+    global_aoi_shapes: list[dict[str, object]] | None = None
+    if aoi_path:
+        aoi_data = load_aoi(aoi_path, crs=aoi_crs)
+        for warning in aoi_data.warnings:
+            LOGGER.warning("%s", warning)
+        global_aoi_shapes = reproject_shapes(aoi_data.shapes, aoi_data.crs, target_crs)
+
     tile_results = []
     tile_dir = work_dir / "tiles"
-    raw_tile_dir = work_dir / "tiles_raw" if backend_profile else tile_dir
     coverage: dict[str, CoverageMetrics] = {}
 
     def process_tile(tile: str) -> tuple[TileResult, CoverageMetrics]:
+        """Normalize a stack tile and return coverage metrics."""
         start_time = perf_counter()
         layer_tile_paths: list[Path] = []
         tile_result: TileResult | None = None
         for index, (_, layer_path, layer_nodata, aoi) in enumerate(warped_layers):
-            tile_path = (
-                work_dir / "stack_layers" / f"layer_{index}" / tile / f"{tile}.tif"
-            )
+            tile_path = work_dir / "stack_layers" / f"layer_{index}" / tile / f"{tile}.tif"
             tile_result = write_tile_dem(
                 layer_path,
                 tile,
@@ -588,6 +659,7 @@ def normalize_stack_for_tiles(
                 resolution=resolution,
                 resampling=_resampling(resampling),
                 dst_nodata=layer_nodata,
+                compression=compression,
             )
             if aoi:
                 if layer_nodata is None:
@@ -598,14 +670,16 @@ def normalize_stack_for_tiles(
         if tile_result is None:
             raise ValueError(f"No stack layers generated for tile {tile}")
 
-        raw_path = raw_tile_dir / tile / f"{tile}.tif"
+        output_path = tile_dir / tile / f"{tile}.tif"
         combined = _combine_stack_tiles(layer_tile_paths, effective_nodata)
         with rasterio.open(layer_tile_paths[0]) as template:
             meta = template.meta.copy()
         if effective_nodata is not None:
             meta["nodata"] = effective_nodata
-        raw_path.parent.mkdir(parents=True, exist_ok=True)
-        with rasterio.open(raw_path, "w", **meta) as dest:
+        if compression:
+            meta["compress"] = compression
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        with rasterio.open(output_path, "w", **meta) as dest:
             dest.write(combined, 1)
 
         total_pixels = 0
@@ -613,7 +687,7 @@ def normalize_stack_for_tiles(
         coverage_before = 1.0
         if coverage_metrics or fill_strategy == "fallback":
             total_pixels, nodata_before, coverage_before = _coverage_stats(
-                raw_path, effective_nodata
+                output_path, effective_nodata
             )
 
         fallback_tile = None
@@ -627,6 +701,7 @@ def normalize_stack_for_tiles(
                     resolution=resolution,
                     resampling=_resampling(resampling),
                     dst_nodata=effective_nodata,
+                    compression=compression,
                 )
             elif fallback_sources:
                 if mosaic_strategy == "per-tile" and len(fallback_sources) > 1:
@@ -637,40 +712,53 @@ def normalize_stack_for_tiles(
                         resolution=resolution,
                         resampling=_resampling(resampling),
                         dst_nodata=effective_nodata,
+                        compression=compression,
                     )
                 else:
+                    if not fallback_sources:
+                        raise ValueError("Fallback sources missing for fill.")
+                    fallback_first = next(iter(fallback_sources))
                     write_tile_dem(
-                        fallback_sources[0],
+                        fallback_first,
                         tile,
                         fallback_tile,
                         resolution=resolution,
                         resampling=_resampling(resampling),
                         dst_nodata=effective_nodata,
+                        compression=compression,
                     )
 
-        filled_pixels = 0
+        fill_result = None
         if fill_strategy != "fallback" or nodata_before > 0:
-            filled_pixels = _apply_fill_strategy(
-                raw_path,
+            fill_result = _apply_fill_strategy(
+                output_path,
                 strategy=fill_strategy,
                 nodata=effective_nodata,
                 fill_value=fill_value,
                 fallback_path=fallback_tile,
             )
 
-        final_path = raw_path
+        filled_pixels = fill_result.filled_pixels if fill_result else 0
+        final_path = output_path
         if backend_profile:
             final_path = tile_dir / tile / f"{tile}.tif"
-            apply_backend_profile(raw_path, final_path, backend_profile)
+            apply_backend_profile(output_path, final_path, backend_profile)
+        if global_aoi_shapes:
+            _apply_aoi_mask(final_path, global_aoi_shapes)
 
         if coverage_metrics:
-            total_after, nodata_after, coverage_after = _coverage_stats(
-                final_path, None
-            )
+            nodata_after = fill_result.nodata_pixels_after if fill_result else nodata_before
+            total_after = total_pixels
+            coverage_after = coverage_before if total_pixels else 1.0
+            if total_pixels:
+                coverage_after = (total_pixels - nodata_after) / total_pixels
         else:
             total_after = total_pixels
             nodata_after = max(0, nodata_before - filled_pixels)
             coverage_after = coverage_before if total_pixels else 1.0
+
+        if backend_profile and backend_profile.require_full_coverage and nodata_after > 0:
+            raise ValueError("Backend profile requires void-free DEMs.")
         metrics = CoverageMetrics(
             total_pixels=total_pixels or total_after,
             nodata_pixels_before=nodata_before,

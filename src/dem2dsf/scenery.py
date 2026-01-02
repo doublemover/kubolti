@@ -25,11 +25,13 @@ def _read_scenery_packs(root: Path) -> list[str] | None:
 
 
 def _is_overlay_pack(name: str) -> bool:
+    """Return True if a scenery pack looks like an overlay pack."""
     lowered = name.lower()
     return lowered.startswith("yortho4xp_") or "overlay" in lowered
 
 
 def _is_base_mesh_pack(name: str) -> bool:
+    """Return True if a scenery pack looks like a base mesh pack."""
     lowered = name.lower()
     return lowered.startswith("zortho4xp_") or "mesh" in lowered
 
@@ -95,12 +97,8 @@ def scan_custom_scenery(root: Path, *, tiles: list[str] | None = None) -> dict[s
         tile_to_packs[tile] = sorted(set(packs))
 
     scenery_packs = _read_scenery_packs(root)
-    suggested_order = (
-        suggested_scenery_order(scenery_packs) if scenery_packs else None
-    )
-    suggested_snippet = (
-        scenery_order_snippet(suggested_order) if suggested_order else None
-    )
+    suggested_order = suggested_scenery_order(scenery_packs) if scenery_packs else None
+    suggested_snippet = scenery_order_snippet(suggested_order) if suggested_order else None
     conflicts: list[dict[str, Any]] = []
     for tile, packs in sorted(tile_to_packs.items()):
         if len(packs) < 2:

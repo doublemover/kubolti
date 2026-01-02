@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import os
+import shlex
 import shutil
 import subprocess
 import sys
 import warnings
 from pathlib import Path
 
+import numpy as np
 import pytest
 
 from dem2dsf.doctor import run_doctor
@@ -15,12 +17,14 @@ from dem2dsf.tools import installer
 from dem2dsf.tools.dsftool import roundtrip_dsf, run_dsftool
 from dem2dsf.tools.ortho4xp import TARGET_ORTHO4XP_VERSION, ortho4xp_version
 from dem2dsf.xp12 import enrich_dsf_rasters
-from tests.utils import with_src_env
+from dem2dsf.xplane_paths import parse_tile
+from tests.utils import with_src_env, write_raster
 
 pytestmark = pytest.mark.integration
 
 ORTHO4XP_SOURCE_URL = "https://github.com/oscarpilote/Ortho4XP"
 XPTOOLS_SOURCE_URL = "https://developer.x-plane.com/tools/xptools/"
+RUN_ORTHO_BUILD_ENV = "DEM2DSF_RUN_ORTHO4XP_BUILD"
 
 
 def _repo_root() -> Path:
@@ -30,8 +34,8 @@ def _repo_root() -> Path:
 def _tool_search_dirs(repo_root: Path) -> list[Path]:
     install_root = repo_root / "tools"
     return [
-        install_root / "ortho4xp",
         install_root / "xptools",
+        install_root / "ortho4xp",
         Path.home() / "Ortho4XP",
         Path.home() / "XPTools",
     ]
@@ -154,10 +158,124 @@ def test_integration_ortho4xp_runner_dry_run(tmp_path: Path) -> None:
         text=True,
         check=False,
     )
-    assert result.returncode == 0, (
-        f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
+    output = f"{result.stdout}\n{result.stderr}"
+    assert result.returncode == 0, f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
+    assert str(script_path) in output
+    for line in output.splitlines():
+        if "Dry run command:" in line:
+            cmd_line = line.split("Dry run command:", 1)[1].strip()
+            tokens = shlex.split(cmd_line, posix=False)
+            lat, lon = parse_tile("+47+008")
+            assert "--tile" not in tokens
+            assert str(lat) in tokens
+            assert str(lon) in tokens
+            break
+    else:
+        raise AssertionError("Dry run command not found in output.")
+
+
+def test_integration_ortho4xp_entrypoint_uses_supported_args(tmp_path: Path) -> None:
+    repo_root = _repo_root()
+    tool_paths = tool_config.load_tool_paths()
+    search_dirs = _tool_search_dirs(repo_root)
+    script_path, _ = _resolve_tool_path(
+        "ortho4xp",
+        tool_paths=tool_paths,
+        search_dirs=search_dirs,
+        finder=installer.find_ortho4xp,
     )
-    assert str(script_path) in result.stdout
+    if not script_path:
+        pytest.skip(f"Ortho4XP not found (source: {ORTHO4XP_SOURCE_URL}).")
+    runner = repo_root / "scripts" / "ortho4xp_runner.py"
+    if not runner.exists():
+        pytest.skip("scripts/ortho4xp_runner.py not found.")
+    dem_path = tmp_path / "dem.tif"
+    dem_path.write_text("synthetic", encoding="utf-8")
+    output_dir = tmp_path / "build"
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(runner),
+            "--tile",
+            "+47+008",
+            "--dem",
+            str(dem_path),
+            "--output",
+            str(output_dir),
+            "--ortho-root",
+            str(script_path.parent),
+            "--dry-run",
+            "--batch",
+            "--pass-output",
+        ],
+        env=with_src_env(),
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    output = f"{result.stdout}\n{result.stderr}"
+    assert result.returncode == 0, f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
+    for line in output.splitlines():
+        if "Dry run command:" in line:
+            cmd_line = line.split("Dry run command:", 1)[1].strip()
+            tokens = shlex.split(cmd_line, posix=False)
+            assert "--batch" not in tokens
+            assert "--output" not in tokens
+            break
+    else:
+        raise AssertionError("Dry run command not found in output.")
+
+
+def test_integration_ortho4xp_build_smoke(tmp_path: Path) -> None:
+    if not os.environ.get(RUN_ORTHO_BUILD_ENV):
+        pytest.skip(f"Set {RUN_ORTHO_BUILD_ENV}=1 to enable Ortho4XP build smoke test.")
+    repo_root = _repo_root()
+    tool_paths = tool_config.load_tool_paths()
+    search_dirs = _tool_search_dirs(repo_root)
+    script_path, _ = _resolve_tool_path(
+        "ortho4xp",
+        tool_paths=tool_paths,
+        search_dirs=search_dirs,
+        finder=installer.find_ortho4xp,
+    )
+    if not script_path:
+        pytest.skip(f"Ortho4XP not found (source: {ORTHO4XP_SOURCE_URL}).")
+    runner = repo_root / "scripts" / "ortho4xp_runner.py"
+    if not runner.exists():
+        pytest.skip("scripts/ortho4xp_runner.py not found.")
+
+    dem_path = tmp_path / "dem.tif"
+    write_raster(
+        dem_path,
+        data=np.array([[100.0, 101.0], [102.0, 103.0]], dtype="float32"),
+        bounds=(8.0, 47.0, 9.0, 48.0),
+        nodata=-9999.0,
+    )
+    output_dir = tmp_path / "build"
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(runner),
+            "--tile",
+            "+47+008",
+            "--dem",
+            str(dem_path),
+            "--output",
+            str(output_dir),
+            "--ortho-root",
+            str(script_path.parent),
+            "--batch",
+            "--autoortho",
+        ],
+        env=with_src_env(),
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
+    assert (output_dir / "Earth nav data").exists()
 
 
 def test_integration_dsftool_roundtrip(tmp_path: Path) -> None:
@@ -175,11 +293,14 @@ def test_integration_dsftool_roundtrip(tmp_path: Path) -> None:
 
     dsf_path = _resolve_global_dsf()
     if dsf_path:
-        roundtrip_dsf(dsftool, dsf_path, tmp_path)
+        roundtrip_dsf([str(dsftool)], dsf_path, tmp_path)
         assert (tmp_path / f"{dsf_path.stem}.txt").exists()
     else:
-        result = run_dsftool(dsftool, ["--help"])
-        assert result.stdout or result.stderr
+        result = run_dsftool([str(dsftool)], ["--help"])
+        assert result.returncode == 0, (
+            f"DSFTool --help failed (code {result.returncode}).\n"
+            f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
+        )
 
 
 def test_integration_xp12_enrichment(tmp_path: Path) -> None:
@@ -202,9 +323,7 @@ def test_integration_xp12_enrichment(tmp_path: Path) -> None:
     target_dsf = tmp_path / global_dsf.name
     shutil.copy(global_dsf, target_dsf)
 
-    result = enrich_dsf_rasters(
-        dsftool, target_dsf, global_dsf, tmp_path / "xp12"
-    )
+    result = enrich_dsf_rasters([str(dsftool)], target_dsf, global_dsf, tmp_path / "xp12")
     assert result.status in {"enriched", "no-op"}
 
 

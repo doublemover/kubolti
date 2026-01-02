@@ -44,6 +44,11 @@ def apply_backend_profile(
     profile: BackendProfile,
 ) -> None:
     """Rewrite a DEM to satisfy backend profile requirements."""
+    temp_path = dst_path
+    if src_path.resolve() == dst_path.resolve():
+        temp_path = dst_path.with_name(f"{dst_path.stem}.profile{dst_path.suffix}")
+        if temp_path.exists():
+            temp_path.unlink()
     with rasterio.open(src_path) as src:
         if src.crs is None:
             raise ValueError("Source DEM must declare a CRS.")
@@ -59,12 +64,10 @@ def apply_backend_profile(
                 data = src.read(1, window=window)
                 if np.isnan(nodata):
                     if np.isnan(data).any():
-                        raise ValueError(
-                            "Backend profile requires void-free DEMs."
-                        )
+                        raise ValueError("Backend profile requires void-free DEMs.")
                 elif np.any(data == nodata):
                     raise ValueError("Backend profile requires void-free DEMs.")
-        with rasterio.open(dst_path, "w", **meta) as dest:
+        with rasterio.open(temp_path, "w", **meta) as dest:
             for _, window in src.block_windows(1):
                 data = src.read(1, window=window)
                 if (
@@ -78,3 +81,5 @@ def apply_backend_profile(
                     else:
                         data[data == src_nodata] = profile.nodata
                 dest.write(data, 1, window=window)
+    if temp_path != dst_path:
+        temp_path.replace(dst_path)

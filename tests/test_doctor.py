@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import subprocess
 import sys
 from pathlib import Path
 
@@ -24,6 +25,7 @@ def test_doctor_defaults() -> None:
     assert "overlay_source" in names
     assert "ortho4xp_runner" in names
     assert "dsftool" in names
+    assert "ddstool" in names
 
 
 def test_check_ortho4xp_version_ok(tmp_path: Path) -> None:
@@ -96,6 +98,30 @@ def test_check_command_ok(tmp_path) -> None:
         encoding="utf-8",
     )
     result = check_command("stub", [sys.executable, str(script)])
+    assert result.status == "ok"
+
+
+def test_check_command_preserves_command_list(monkeypatch) -> None:
+    captured = {}
+
+    def fake_run(command, **_kwargs):
+        captured["command"] = command
+        return subprocess.CompletedProcess(command, 0, "", "")
+
+    monkeypatch.setattr("dem2dsf.doctor.subprocess.run", fake_run)
+    monkeypatch.setattr("dem2dsf.doctor.shutil.which", lambda *_: "/bin/echo")
+    result = check_command("stub", ["echo", "--flag"])
+    assert result.status == "ok"
+    assert captured["command"] == ["echo", "--flag", "--help"]
+
+
+def test_check_command_accepts_string(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "dem2dsf.doctor.subprocess.run",
+        lambda command, **_kwargs: subprocess.CompletedProcess(command, 0, "", ""),
+    )
+    monkeypatch.setattr("dem2dsf.doctor.shutil.which", lambda *_: "/bin/echo")
+    result = check_command("stub", "echo")
     assert result.status == "ok"
 
 

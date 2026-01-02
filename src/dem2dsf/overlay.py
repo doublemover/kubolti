@@ -4,13 +4,20 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import logging
 import shutil
 from dataclasses import dataclass
+from importlib import metadata
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any, Protocol, runtime_checkable
 
 from dem2dsf.xplane_paths import dsf_path as xplane_dsf_path
 from dem2dsf.xplane_paths import tile_from_dsf_path
+
+OVERLAY_ENTRYPOINT_GROUP = "dem2dsf.overlays"
+OVERLAY_INTERFACE_VERSION = 1
+
+LOGGER = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -33,12 +40,15 @@ class OverlayResult:
     errors: tuple[str, ...]
 
 
+@runtime_checkable
 class OverlayGenerator(Protocol):
     """Protocol for overlay generator plugins."""
 
     name: str
+    interface_version: int
 
     def generate(self, request: OverlayRequest) -> OverlayResult:
+        """Generate overlay artifacts for a build request."""
         raise NotImplementedError
 
 
@@ -46,12 +56,28 @@ class OverlayRegistry:
     """Registry for overlay generators."""
 
     def __init__(self) -> None:
+        """Initialize an empty overlay generator registry."""
         self._generators: dict[str, OverlayGenerator] = {}
 
-    def register(self, generator: OverlayGenerator) -> None:
+    def register(self, generator: OverlayGenerator, *, strict: bool = True) -> None:
         """Register a new overlay generator by name."""
+        interface_version = getattr(generator, "interface_version", None)
+        if interface_version != OVERLAY_INTERFACE_VERSION:
+            message = (
+                "Overlay generator interface version mismatch for "
+                f"{getattr(generator, 'name', '<unknown>')}: {interface_version} "
+                f"(expected {OVERLAY_INTERFACE_VERSION})"
+            )
+            if strict:
+                raise ValueError(message)
+            LOGGER.warning("%s", message)
+            return
         if generator.name in self._generators:
-            raise ValueError(f"Overlay generator already registered: {generator.name}")
+            message = f"Overlay generator already registered: {generator.name}"
+            if strict:
+                raise ValueError(message)
+            LOGGER.warning("%s", message)
+            return
         self._generators[generator.name] = generator
 
     def get(self, name: str) -> OverlayGenerator | None:
@@ -162,9 +188,7 @@ def copy_overlay_assets(
             copied_tiles.append(tile)
     else:
         shutil.copytree(earth_dir, output_earth, dirs_exist_ok=True)
-        copied_tiles = sorted(
-            {tile_from_dsf_path(path) for path in output_earth.rglob("*.dsf")}
-        )
+        copied_tiles = sorted({tile_from_dsf_path(path) for path in output_earth.rglob("*.dsf")})
 
     dsf_files = _count_files(output_earth, "*.dsf")
     terrain_files = 0
@@ -172,16 +196,12 @@ def copy_overlay_assets(
     if include_terrain:
         terrain_src = build_dir / "terrain"
         if terrain_src.exists():
-            shutil.copytree(
-                terrain_src, output_dir / "terrain", dirs_exist_ok=True
-            )
+            shutil.copytree(terrain_src, output_dir / "terrain", dirs_exist_ok=True)
             terrain_files = _count_files(output_dir / "terrain")
     if include_textures:
         textures_src = build_dir / "textures"
         if textures_src.exists():
-            shutil.copytree(
-                textures_src, output_dir / "textures", dirs_exist_ok=True
-            )
+            shutil.copytree(textures_src, output_dir / "textures", dirs_exist_ok=True)
             texture_files = _count_files(output_dir / "textures")
 
     return {
@@ -249,9 +269,7 @@ def inventory_overlay_assets(
         "texture_refs": sorted(texture_refs),
     }
     inventory_path = output_dir / "overlay_inventory.json"
-    inventory_path.write_text(
-        json.dumps(inventory, indent=2), encoding="utf-8"
-    )
+    inventory_path.write_text(json.dumps(inventory, indent=2), encoding="utf-8")
     return {
         "inventory_path": str(inventory_path),
         "tile_count": len(tile_names),
@@ -265,6 +283,7 @@ class DrapeOverlayGenerator:
     """Generator that rewrites terrain textures for drape overlays."""
 
     name = "drape"
+    interface_version = OVERLAY_INTERFACE_VERSION
 
     def generate(self, request: OverlayRequest) -> OverlayResult:
         """Generate a drape overlay based on a build directory."""
@@ -303,6 +322,7 @@ class CopyOverlayGenerator:
     """Generator that copies existing overlay assets into a new package."""
 
     name = "copy"
+    interface_version = OVERLAY_INTERFACE_VERSION
 
     def generate(self, request: OverlayRequest) -> OverlayResult:
         """Copy overlay assets out of a build directory."""
@@ -333,9 +353,7 @@ class CopyOverlayGenerator:
                 errors=(str(exc),),
             )
         if artifacts["missing_tiles"]:
-            warnings.append(
-                f"Missing tiles: {', '.join(artifacts['missing_tiles'])}"
-            )
+            warnings.append(f"Missing tiles: {', '.join(artifacts['missing_tiles'])}")
         if include_terrain and artifacts["terrain_files"] == 0:
             warnings.append("No terrain files copied.")
         if include_textures and artifacts["texture_files"] == 0:
@@ -352,6 +370,7 @@ class InventoryOverlayGenerator:
     """Generator that inventories overlay assets without copying them."""
 
     name = "inventory"
+    interface_version = OVERLAY_INTERFACE_VERSION
 
     def generate(self, request: OverlayRequest) -> OverlayResult:
         """Scan an existing build and emit an overlay inventory report."""
@@ -398,6 +417,67 @@ def load_overlay_plugin(path: Path, registry: OverlayRegistry) -> None:
         registry.register(plugin)
 
 
+def _resolve_entrypoint_generator(
+    candidate: object, entrypoint: metadata.EntryPoint
+) -> OverlayGenerator | None:
+    """Coerce an entrypoint payload into an overlay generator instance."""
+    if isinstance(candidate, type):
+        try:
+            generator = candidate()
+        except TypeError as exc:
+            LOGGER.warning(
+                "Overlay entrypoint '%s' could not instantiate: %s",
+                entrypoint.name,
+                exc,
+            )
+            return None
+        if isinstance(generator, OverlayGenerator):
+            return generator
+        LOGGER.warning("Overlay entrypoint '%s' did not create a generator.", entrypoint.name)
+        return None
+    if isinstance(candidate, OverlayGenerator):
+        return candidate
+    if callable(candidate):
+        try:
+            generator = candidate()
+        except TypeError as exc:
+            LOGGER.warning(
+                "Overlay entrypoint '%s' could not be called without arguments: %s",
+                entrypoint.name,
+                exc,
+            )
+            return None
+        if isinstance(generator, OverlayGenerator):
+            return generator
+    LOGGER.warning("Overlay entrypoint '%s' did not return a generator.", entrypoint.name)
+    return None
+
+
+def load_overlay_entrypoints(registry: OverlayRegistry) -> None:
+    """Load overlay generators registered via entrypoints."""
+    try:
+        entry_points = metadata.entry_points(group=OVERLAY_ENTRYPOINT_GROUP)
+    except Exception as exc:  # pragma: no cover - entrypoint discovery failures are rare
+        LOGGER.warning("Failed to read overlay entrypoints: %s", exc)
+        return
+    for entry_point in entry_points:
+        try:
+            candidate = entry_point.load()
+        except Exception as exc:
+            LOGGER.warning("Failed to load overlay entrypoint '%s': %s", entry_point.name, exc)
+            continue
+        generator = _resolve_entrypoint_generator(candidate, entry_point)
+        if not generator:
+            continue
+        if generator.name != entry_point.name:
+            LOGGER.warning(
+                "Overlay entrypoint '%s' exposes generator '%s'.",
+                entry_point.name,
+                generator.name,
+            )
+        registry.register(generator, strict=False)
+
+
 def run_overlay(
     *,
     build_dir: Path | None,
@@ -412,6 +492,7 @@ def run_overlay(
     registry.register(DrapeOverlayGenerator())
     registry.register(CopyOverlayGenerator())
     registry.register(InventoryOverlayGenerator())
+    load_overlay_entrypoints(registry)
     for plugin_path in plugin_paths or []:
         load_overlay_plugin(plugin_path, registry)
 

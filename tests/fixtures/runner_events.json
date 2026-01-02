@@ -1,0 +1,21 @@
+{
+  "schema_version": "1",
+  "runner": "ortho4xp",
+  "tile": "+47+008",
+  "attempt": 1,
+  "events": [
+    {
+      "event": "step",
+      "detail": "Step 1: Assemble vector data",
+      "stream": "stdout",
+      "line": 1,
+      "step": "1"
+    },
+    {
+      "event": "download",
+      "detail": "Downloading DEM tile",
+      "stream": "stderr",
+      "line": 2
+    }
+  ]
+}

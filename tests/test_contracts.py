@@ -33,6 +33,16 @@ def test_build_report_schema_with_performance() -> None:
     contracts.validate_build_report(report)
 
 
+def test_runner_events_schema() -> None:
+    payload = _load_fixture("runner_events.json")
+    contracts.validate_runner_events(payload)
+
+
+def test_build_config_schema() -> None:
+    config = _load_fixture("build_config.json")
+    contracts.validate_build_config(config)
+
+
 def test_backend_contracts() -> None:
     backends = list_backends()
     assert "ortho4xp" in backends

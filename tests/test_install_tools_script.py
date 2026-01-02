@@ -10,8 +10,9 @@ from dem2dsf.tools.installer import InstallResult
 def _load_install_tools():
     module_path = Path(__file__).resolve().parents[1] / "scripts" / "install_tools.py"
     spec = importlib.util.spec_from_file_location("install_tools", module_path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"Unable to load script: {module_path}")
     module = importlib.util.module_from_spec(spec)
-    assert spec and spec.loader
     spec.loader.exec_module(module)
     return module
 
@@ -34,6 +35,11 @@ def test_install_tools_script_writes_config(monkeypatch, tmp_path: Path) -> None
         module,
         "_ensure_dsftool",
         lambda *a, **k: ok_result("dsftool"),
+    )
+    monkeypatch.setattr(
+        module,
+        "find_ddstool",
+        lambda *_args, **_kwargs: stub_path,
     )
 
     monkeypatch.setattr(

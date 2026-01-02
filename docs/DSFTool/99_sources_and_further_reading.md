@@ -23,14 +23,6 @@ This is a curated list of the most useful primary references for DSFTool and DSF
 - **Scenery Development Documentation hub** (links to multiple file format specs and manuals)  
   https://developer.x-plane.com/docs/scenery/
 
-## Build / source code references (Laminar)
-
-- **Scenery tools source code build guide**  
-  https://developer.x-plane.com/code/
-
-- **XPTools source repository**  
-  https://github.com/X-Plane/xptools
-
 ## Developer blog posts about DSFTool
 
 - **New DSFTool Available** (2012; highlights raster layer support for X‑Plane 10)  
@@ -48,4 +40,3 @@ Treat forums as practical experience; validate against Laminar’s docs.
 
 - **DSF Raster Definitions: sea_level, bathymetry, and the future**  
   https://forums.x-plane.org/forums/topic/270403-dsf-raster-definitions-sea_level-bathymetry-and-the-future/
-

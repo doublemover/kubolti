@@ -215,11 +215,7 @@ def test_normalize_stack_for_tiles_aoi_requires_nodata(tmp_path) -> None:
         encoding="utf-8",
     )
 
-    stack = DemStack(
-        layers=(
-            DemLayer(path=dem_path, priority=0, aoi=aoi_path, nodata=None),
-        )
-    )
+    stack = DemStack(layers=(DemLayer(path=dem_path, priority=0, aoi=aoi_path, nodata=None),))
 
     with pytest.raises(ValueError, match="AOI mask requires a nodata value"):
         normalize_stack_for_tiles(

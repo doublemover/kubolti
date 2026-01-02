@@ -5,6 +5,7 @@ import json
 import runpy
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -62,6 +63,59 @@ def test_cli_build_success(monkeypatch) -> None:
     assert result == 0
 
 
+def test_cli_build_infers_tiles(monkeypatch) -> None:
+    captured = {}
+
+    def fake_run_build(*, tiles, **_kwargs):
+        captured["tiles"] = tiles
+        return BuildResult(build_plan={}, build_report={"errors": []})
+
+    def fake_infer_tiles(*_args, **_kwargs):
+        return SimpleNamespace(tiles=["+47+008"], warnings=())
+
+    monkeypatch.setattr(cli, "run_build", fake_run_build)
+    monkeypatch.setattr(cli, "infer_tiles", fake_infer_tiles)
+
+    result = cli.main(["build", "--dem", "dem.tif", "--infer-tiles"])
+    assert result == 0
+    assert captured["tiles"] == ["+47+008"]
+
+
+def test_cli_build_with_config(monkeypatch, tmp_path: Path) -> None:
+    config_path = tmp_path / "config.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "inputs": {"dems": ["dem.tif"], "tiles": ["+47+008"]},
+                "options": {"dry_run": True},
+            }
+        ),
+        encoding="utf-8",
+    )
+    captured = {}
+
+    def fake_run_build(**kwargs):
+        captured.update(kwargs)
+        return BuildResult(build_plan={}, build_report={"errors": []})
+
+    monkeypatch.setattr(cli, "run_build", fake_run_build)
+
+    result = cli.main(["build", "--config", str(config_path), "--output", str(tmp_path)])
+    assert result == 0
+    assert captured["tiles"] == ["+47+008"]
+    assert captured["dem_paths"][0].name == "dem.tif"
+
+
+def test_cli_clean_dry_run(tmp_path: Path) -> None:
+    build_dir = tmp_path / "build"
+    (build_dir / "normalized").mkdir(parents=True)
+
+    result = cli.main(["clean", "--build-dir", str(build_dir)])
+
+    assert result == 0
+    assert (build_dir / "normalized").exists()
+
+
 def test_cli_build_profile_options(monkeypatch) -> None:
     captured = {}
 
@@ -99,7 +153,7 @@ def test_cli_presets_list_json(capsys) -> None:
     result = cli.main(["presets", "list", "--format", "json"])
     assert result == 0
     output = capsys.readouterr().out
-    assert "\"name\": \"usgs-13as\"" in output
+    assert '"name": "usgs-13as"' in output
 
 
 def test_cli_presets_show_text(capsys) -> None:
@@ -113,7 +167,7 @@ def test_cli_presets_show_json(capsys) -> None:
     result = cli.main(["presets", "show", "usgs-13as", "--format", "json"])
     assert result == 0
     output = capsys.readouterr().out
-    assert "\"name\": \"usgs-13as\"" in output
+    assert '"name": "usgs-13as"' in output
 
 
 def test_cli_presets_unknown(capsys) -> None:
@@ -127,7 +181,7 @@ def test_cli_presets_export_include_builtins(capsys) -> None:
     result = cli.main(["presets", "export", "--include-builtins"])
     assert result == 0
     output = capsys.readouterr().out
-    assert "\"name\": \"usgs-13as\"" in output
+    assert '"name": "usgs-13as"' in output
 
 
 def test_cli_presets_import_export_roundtrip(tmp_path: Path, capsys) -> None:
@@ -147,16 +201,14 @@ def test_cli_presets_import_export_roundtrip(tmp_path: Path, capsys) -> None:
     input_path.write_text(json.dumps(input_payload), encoding="utf-8")
     dest_path = tmp_path / "user_presets.json"
 
-    result = cli.main(
-        ["presets", "import", str(input_path), "--user-path", str(dest_path)]
-    )
+    result = cli.main(["presets", "import", str(input_path), "--user-path", str(dest_path)])
     assert result == 0
     capsys.readouterr()
 
     result = cli.main(["presets", "export", "--user-path", str(dest_path)])
     assert result == 0
     output = capsys.readouterr().out
-    assert "\"custom\"" in output
+    assert '"custom"' in output
 
 
 def test_cli_presets_import_missing(tmp_path: Path, capsys) -> None:
@@ -178,9 +230,7 @@ def test_cli_presets_import_invalid(tmp_path: Path, capsys) -> None:
 
 def test_cli_presets_export_to_file(tmp_path: Path) -> None:
     output_path = tmp_path / "export.json"
-    result = cli.main(
-        ["presets", "export", "--include-builtins", "--output", str(output_path)]
-    )
+    result = cli.main(["presets", "export", "--include-builtins", "--output", str(output_path)])
     assert result == 0
     assert output_path.exists()
 
@@ -209,6 +259,25 @@ def test_cli_wizard(monkeypatch, tmp_path: Path) -> None:
     assert called["ok"] is True
 
 
+def test_cli_tiles_command_json(monkeypatch, capsys) -> None:
+    def fake_infer_tiles(*_args, **_kwargs):
+        return SimpleNamespace(
+            tiles=["+47+008"],
+            bounds=(8.0, 47.0, 9.0, 48.0),
+            dem_bounds=None,
+            aoi_bounds=None,
+            coverage={"+47+008": 1.0},
+            warnings=(),
+        )
+
+    monkeypatch.setattr(cli, "infer_tiles", fake_infer_tiles)
+
+    result = cli.main(["tiles", "--dem", "dem.tif", "--json"])
+    assert result == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["tiles"] == ["+47+008"]
+
+
 def test_cli_doctor_error(monkeypatch) -> None:
     monkeypatch.setattr(
         cli,
@@ -230,17 +299,13 @@ def test_cli_doctor_success(monkeypatch) -> None:
 
 
 def test_cli_autoortho_requires_tile(monkeypatch) -> None:
-    monkeypatch.setattr(
-        cli, "_default_ortho_runner", lambda: [sys.executable, "runner.py"]
-    )
+    monkeypatch.setattr(cli, "_default_ortho_runner", lambda: [sys.executable, "runner.py"])
     with pytest.raises(SystemExit):
         cli.main(["autoortho", "--dem", "dem.tif", "--ortho-root", "ortho"])
 
 
 def test_cli_autoortho_requires_dem(monkeypatch) -> None:
-    monkeypatch.setattr(
-        cli, "_default_ortho_runner", lambda: [sys.executable, "runner.py"]
-    )
+    monkeypatch.setattr(cli, "_default_ortho_runner", lambda: [sys.executable, "runner.py"])
     with pytest.raises(SystemExit):
         cli.main(["autoortho", "--tile", "+47+008", "--ortho-root", "ortho"])
 
@@ -263,9 +328,7 @@ def test_cli_autoortho_missing_runner(monkeypatch) -> None:
 
 def test_cli_autoortho_requires_ortho_root(monkeypatch) -> None:
     monkeypatch.setattr(cli, "load_tool_paths", lambda *_: {})
-    monkeypatch.setattr(
-        cli, "_default_ortho_runner", lambda: [sys.executable, "runner.py"]
-    )
+    monkeypatch.setattr(cli, "_default_ortho_runner", lambda: [sys.executable, "runner.py"])
     with pytest.raises(SystemExit):
         cli.main(["autoortho", "--dem", "dem.tif", "--tile", "+47+008"])
 
@@ -274,9 +337,7 @@ def test_cli_autoortho_success(monkeypatch, tmp_path: Path) -> None:
     runner = tmp_path / "runner.py"
     runner.write_text("print('ok')", encoding="utf-8")
 
-    monkeypatch.setattr(
-        cli, "_default_ortho_runner", lambda: [sys.executable, str(runner)]
-    )
+    monkeypatch.setattr(cli, "_default_ortho_runner", lambda: [sys.executable, str(runner)])
     monkeypatch.setattr(
         cli,
         "run_build",
@@ -298,9 +359,7 @@ def test_cli_autoortho_success(monkeypatch, tmp_path: Path) -> None:
 
 
 def test_cli_autoortho_options(monkeypatch) -> None:
-    monkeypatch.setattr(
-        cli, "_default_ortho_runner", lambda: [sys.executable, "runner.py"]
-    )
+    monkeypatch.setattr(cli, "_default_ortho_runner", lambda: [sys.executable, "runner.py"])
     captured = {}
 
     def fake_run_build(*, options, **_kwargs):
@@ -329,9 +388,7 @@ def test_cli_autoortho_options(monkeypatch) -> None:
 
 
 def test_cli_autoortho_reports_errors(monkeypatch) -> None:
-    monkeypatch.setattr(
-        cli, "_default_ortho_runner", lambda: [sys.executable, "runner.py"]
-    )
+    monkeypatch.setattr(cli, "_default_ortho_runner", lambda: [sys.executable, "runner.py"])
     monkeypatch.setattr(
         cli,
         "run_build",
@@ -357,15 +414,15 @@ def test_cli_build_uses_tool_paths(monkeypatch, tmp_path: Path) -> None:
     ortho_script.write_text("stub", encoding="utf-8")
     dsftool = tmp_path / "DSFTool.exe"
     dsftool.write_text("stub", encoding="utf-8")
+    ddstool = tmp_path / "DDSTool.exe"
+    ddstool.write_text("stub", encoding="utf-8")
 
     monkeypatch.setattr(
         cli,
         "load_tool_paths",
-        lambda *_: {"ortho4xp": ortho_script, "dsftool": dsftool},
+        lambda *_: {"ortho4xp": ortho_script, "dsftool": dsftool, "ddstool": ddstool},
     )
-    monkeypatch.setattr(
-        cli, "_default_ortho_runner", lambda: [sys.executable, "runner.py"]
-    )
+    monkeypatch.setattr(cli, "_default_ortho_runner", lambda: [sys.executable, "runner.py"])
 
     captured = {}
 
@@ -380,6 +437,7 @@ def test_cli_build_uses_tool_paths(monkeypatch, tmp_path: Path) -> None:
     assert captured["runner"][0] == sys.executable
     assert "--ortho-root" in captured["runner"]
     assert captured["dsftool"] == [str(dsftool)]
+    assert captured["ddstool"] == [str(ddstool)]
 
 
 def test_cli_publish_uses_tool_paths(monkeypatch, tmp_path: Path) -> None:
@@ -409,6 +467,7 @@ def test_cli_publish_uses_tool_paths(monkeypatch, tmp_path: Path) -> None:
     )
     assert result == 0
     assert captured["sevenzip_path"] == sevenzip
+    assert captured["mode"] == "full"
 
 
 def test_cli_autoortho_uses_tool_paths(monkeypatch, tmp_path: Path) -> None:
@@ -417,9 +476,7 @@ def test_cli_autoortho_uses_tool_paths(monkeypatch, tmp_path: Path) -> None:
     ortho_script.write_text("stub", encoding="utf-8")
 
     monkeypatch.setattr(cli, "load_tool_paths", lambda *_: {"ortho4xp": ortho_script})
-    monkeypatch.setattr(
-        cli, "_default_ortho_runner", lambda: [sys.executable, "runner.py"]
-    )
+    monkeypatch.setattr(cli, "_default_ortho_runner", lambda: [sys.executable, "runner.py"])
     captured = {}
 
     def fake_run_build(*, options, **_kwargs):
@@ -525,9 +582,7 @@ def test_cli_cache_list(monkeypatch, tmp_path: Path, capsys) -> None:
         "find_tile_cache_entries",
         lambda *_args, **_kwargs: {"osm": [Path("osm")], "elevation": [], "imagery": []},
     )
-    result = cli.main(
-        ["cache", "list", "--ortho-root", str(tmp_path), "--tile", "+47+008"]
-    )
+    result = cli.main(["cache", "list", "--ortho-root", str(tmp_path), "--tile", "+47+008"])
     assert result == 0
     output = json.loads(capsys.readouterr().out)
     assert output["tile"] == "+47+008"
@@ -544,9 +599,7 @@ def test_cli_cache_purge(monkeypatch, tmp_path: Path, capsys) -> None:
             "removed": {},
         },
     )
-    result = cli.main(
-        ["cache", "purge", "--ortho-root", str(tmp_path), "--tile", "+47+008"]
-    )
+    result = cli.main(["cache", "purge", "--ortho-root", str(tmp_path), "--tile", "+47+008"])
     assert result == 0
     output = json.loads(capsys.readouterr().out)
     assert output["dry_run"] is True
@@ -557,14 +610,16 @@ def test_cli_publish_missing_7z(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setattr(cli.sys.stdin, "isatty", lambda: False)
 
     with pytest.raises(SystemExit):
-        cli.main([
-            "publish",
-            "--build-dir",
-            str(tmp_path),
-            "--output",
-            str(tmp_path / "out.zip"),
-            "--dsf-7z",
-        ])
+        cli.main(
+            [
+                "publish",
+                "--build-dir",
+                str(tmp_path),
+                "--output",
+                str(tmp_path / "out.zip"),
+                "--dsf-7z",
+            ]
+        )
 
 
 def test_cli_publish_detected_7z(monkeypatch, tmp_path: Path) -> None:
@@ -589,9 +644,10 @@ def test_cli_publish_detected_7z(monkeypatch, tmp_path: Path) -> None:
     )
     assert result == 0
     assert captured["sevenzip_path"] == Path("7z.exe")
+    assert captured["mode"] == "full"
 
 
-def test_cli_publish_prompt_for_7z(monkeypatch, tmp_path: Path) -> None:        
+def test_cli_publish_prompt_for_7z(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setattr(cli, "find_sevenzip", lambda *_: None)
     monkeypatch.setattr(cli.sys.stdin, "isatty", lambda: True)
     monkeypatch.setattr("builtins.input", lambda *_: "C:/fake/7z.exe")
@@ -615,6 +671,31 @@ def test_cli_publish_prompt_for_7z(monkeypatch, tmp_path: Path) -> None:
     )
     assert result == 0
     assert captured["sevenzip_path"] == Path("C:/fake/7z.exe")
+    assert captured["mode"] == "full"
+
+
+def test_cli_publish_mode(monkeypatch, tmp_path: Path) -> None:
+    captured = {}
+
+    def fake_publish_build(*_args, **kwargs):
+        captured.update(kwargs)
+        return {"zip_path": "out.zip", "warnings": []}
+
+    monkeypatch.setattr(cli, "publish_build", fake_publish_build)
+
+    result = cli.main(
+        [
+            "publish",
+            "--build-dir",
+            str(tmp_path),
+            "--output",
+            str(tmp_path / "out.zip"),
+            "--mode",
+            "scenery",
+        ]
+    )
+    assert result == 0
+    assert captured["mode"] == "scenery"
 
 
 def test_cli_publish_prompt_blank_requires_allow(monkeypatch, tmp_path: Path) -> None:
@@ -635,20 +716,22 @@ def test_cli_publish_prompt_blank_requires_allow(monkeypatch, tmp_path: Path) ->
         )
 
 
-def test_cli_publish_with_warnings(monkeypatch, tmp_path: Path) -> None:        
+def test_cli_publish_with_warnings(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setattr(
         cli,
         "publish_build",
         lambda *_args, **_kwargs: {"zip_path": "out.zip", "warnings": ["warn"]},
     )
 
-    result = cli.main([
-        "publish",
-        "--build-dir",
-        str(tmp_path),
-        "--output",
-        str(tmp_path / "out.zip"),
-    ])
+    result = cli.main(
+        [
+            "publish",
+            "--build-dir",
+            str(tmp_path),
+            "--output",
+            str(tmp_path / "out.zip"),
+        ]
+    )
     assert result == 0
 
 
@@ -656,7 +739,7 @@ def test_cli_unknown_command(monkeypatch) -> None:
     monkeypatch.setattr(
         argparse.ArgumentParser,
         "parse_args",
-        lambda *_args, **_kwargs: argparse.Namespace(command="unknown"),        
+        lambda *_args, **_kwargs: argparse.Namespace(command="unknown"),
     )
     with pytest.raises(SystemExit):
         cli.main(["unknown"])

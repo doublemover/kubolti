@@ -9,7 +9,9 @@ import os
 import re
 import subprocess
 from pathlib import Path
+from typing import Any
 
+from dem2dsf.contracts import RUNNER_EVENTS_SCHEMA_VERSION
 from dem2dsf.logging_utils import LogOptions, configure_logging
 from dem2dsf.tools.ortho4xp import (
     TARGET_ORTHO4XP_VERSION,
@@ -19,6 +21,7 @@ from dem2dsf.tools.ortho4xp import (
     default_scenery_root,
     find_ortho4xp_script,
     ortho4xp_version,
+    parse_config_values,
     patch_config_values,
     probe_python_runtime,
     read_config_values,
@@ -132,15 +135,26 @@ def _write_logs(
     log_dir = output_dir / "runner_logs"
     log_dir.mkdir(parents=True, exist_ok=True)
     suffix = "" if attempt == 1 else f".attempt{attempt}"
-    (log_dir / f"ortho4xp_{tile}{suffix}.stdout.log").write_text(
-        result.stdout, encoding="utf-8"
+    (log_dir / f"ortho4xp_{tile}{suffix}.stdout.log").write_text(result.stdout, encoding="utf-8")
+    (log_dir / f"ortho4xp_{tile}{suffix}.stderr.log").write_text(result.stderr, encoding="utf-8")
+    events = build_runner_event_payload(
+        tile=tile,
+        attempt=attempt,
+        stdout=result.stdout,
+        stderr=result.stderr,
     )
-    (log_dir / f"ortho4xp_{tile}{suffix}.stderr.log").write_text(
-        result.stderr, encoding="utf-8"
-    )
-    events = parse_runner_events(result.stdout, result.stderr)
     (log_dir / f"ortho4xp_{tile}{suffix}.events.json").write_text(
         json.dumps(events, indent=2), encoding="utf-8"
+    )
+
+
+def _write_stage_metadata(output_dir: Path, tile: str, staged_path: Path) -> None:
+    """Write staged DEM metadata for the runner logs."""
+    log_dir = output_dir / "runner_logs"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    payload = {"staged_dem": str(staged_path)}
+    (log_dir / f"ortho4xp_{tile}.staged.json").write_text(
+        json.dumps(payload, indent=2), encoding="utf-8"
     )
 
 
@@ -150,9 +164,13 @@ TRIANGLE_FAILURE_PATTERN = re.compile(
     re.IGNORECASE,
 )
 LOGGER = logging.getLogger("dem2dsf.runner")
+SENSITIVE_CONFIG_TOKENS = ("key", "token", "secret", "pass", "auth", "license")
+RUNNER_NAME = "ortho4xp"
+SENSITIVE_CONFIG_TOKENS = ("key", "token", "secret", "pass", "auth", "license")
 
 
 def _event_from_line(line: str) -> dict[str, str] | None:
+    """Extract a structured event from a runner output line."""
     stripped = line.strip()
     if not stripped:
         return None
@@ -171,9 +189,9 @@ def _event_from_line(line: str) -> dict[str, str] | None:
     return None
 
 
-def parse_runner_events(stdout: str, stderr: str) -> list[dict[str, str]]:
+def parse_runner_events(stdout: str, stderr: str) -> list[dict[str, str | int]]:
     """Parse Ortho4XP output into structured milestone events."""
-    events: list[dict[str, str]] = []
+    events: list[dict[str, str | int]] = []
     for stream, output in (("stdout", stdout), ("stderr", stderr)):
         for index, line in enumerate(output.splitlines(), start=1):
             event = _event_from_line(line)
@@ -189,10 +207,25 @@ def parse_runner_events(stdout: str, stderr: str) -> list[dict[str, str]]:
     return events
 
 
+def build_runner_event_payload(
+    *, tile: str, attempt: int, stdout: str, stderr: str
+) -> dict[str, Any]:
+    """Build a versioned runner events payload."""
+    events = parse_runner_events(stdout, stderr)
+    return {
+        "schema_version": RUNNER_EVENTS_SCHEMA_VERSION,
+        "runner": RUNNER_NAME,
+        "tile": tile,
+        "attempt": attempt,
+        "events": events,
+    }
+
+
 def _runner_env() -> dict[str, str]:
+    """Return an environment mapping with src/ on PYTHONPATH."""
     env = dict(os.environ)
-    source_root = Path(__file__).resolve().parents[1] / "src"
-    if source_root.exists():
+    source_root = Path(__file__).resolve().parents[3] / "src"
+    if (source_root / "dem2dsf").exists():
         existing = env.get("PYTHONPATH", "")
         entries = [entry for entry in existing.split(os.pathsep) if entry]
         source_str = str(source_root)
@@ -202,6 +235,47 @@ def _runner_env() -> dict[str, str]:
     return env
 
 
+def _is_sensitive_key(key: str) -> bool:
+    lowered = key.lower()
+    return any(token in lowered for token in SENSITIVE_CONFIG_TOKENS)
+
+
+def _config_diff(original: str | None, config_path: Path) -> dict[str, dict[str, str | None]]:
+    original_values = parse_config_values(original or "")
+    updated_values = read_config_values(config_path)
+    diff: dict[str, dict[str, str | None]] = {}
+    for key, new_value in updated_values.items():
+        old_value = original_values.get(key)
+        if old_value == new_value:
+            continue
+        if _is_sensitive_key(key):
+            diff[key] = {
+                "before": "<redacted>" if old_value is not None else None,
+                "after": "<redacted>",
+            }
+        else:
+            diff[key] = {"before": old_value, "after": new_value}
+    return diff
+
+
+def _write_config_diff(
+    output_dir: Path,
+    tile: str,
+    diff: dict[str, dict[str, str | None]],
+    *,
+    attempt: int = 1,
+) -> None:
+    if not diff:
+        return
+    log_dir = output_dir / "runner_logs"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    suffix = "" if attempt == 1 else f".attempt{attempt}"
+    payload = {"diff": diff}
+    (log_dir / f"ortho4xp_{tile}{suffix}.config.json").write_text(
+        json.dumps(payload, indent=2), encoding="utf-8"
+    )
+
+
 def _run_with_config(
     *,
     config_path: Path,
@@ -209,14 +283,16 @@ def _run_with_config(
     cmd: list[str],
     cwd: Path,
     persist_config: bool,
-) -> subprocess.CompletedProcess[str]:
+) -> tuple[subprocess.CompletedProcess[str], dict[str, dict[str, str | None]] | None]:
     original_config: str | None = None
     patched = False
+    diff: dict[str, dict[str, str | None]] | None = None
     if config_updates:
         original_config = patch_config_values(config_path, config_updates)
         patched = True
+        diff = _config_diff(original_config, config_path)
     try:
-        return subprocess.run(
+        result = subprocess.run(
             cmd,
             cwd=cwd,
             capture_output=True,
@@ -224,17 +300,20 @@ def _run_with_config(
             check=False,
             env=_runner_env(),
         )
+        return result, diff
     finally:
         if patched and not persist_config:
             restore_config(config_path, original_config)
 
 
-def _min_angle_from_config(
-    config_path: Path, config_updates: dict[str, object]
-) -> float | None:
-    if "min_angle" in config_updates:
+def _min_angle_from_config(config_path: Path, config_updates: dict[str, object]) -> float | None:
+    """Return the min_angle value from updates or config file."""
+    value = config_updates.get("min_angle")
+    if value is not None:
+        if not isinstance(value, (int, float, str)):
+            return None
         try:
-            return float(config_updates["min_angle"])
+            return float(value)
         except (TypeError, ValueError):
             return None
     config = read_config_values(config_path)
@@ -247,6 +326,7 @@ def _min_angle_from_config(
 
 
 def _retry_min_angles(base: float | None) -> list[float]:
+    """Return a retry ladder of min_angle values below the base."""
     ladder = [5.0, 0.0]
     if base is None:
         return ladder
@@ -254,6 +334,7 @@ def _retry_min_angles(base: float | None) -> list[float]:
 
 
 def _needs_triangulation_retry(stdout: str, stderr: str) -> bool:
+    """Return True if output suggests a triangulation retry is needed."""
     output = f"{stdout}\n{stderr}"
     return bool(TRIANGLE_FAILURE_PATTERN.search(output))
 
@@ -313,17 +394,13 @@ def main() -> int:
 
     try:
         script_path = (
-            Path(args.ortho_script)
-            if args.ortho_script
-            else find_ortho4xp_script(ortho_root)
+            Path(args.ortho_script) if args.ortho_script else find_ortho4xp_script(ortho_root)
         )
     except Ortho4XPNotFoundError as exc:
         LOGGER.error("%s", exc, extra=log_extra)
         return 2
     if args.ortho_script and not script_path.exists():
-        LOGGER.error(
-            "Ortho4XP script not found: %s", script_path, extra=log_extra
-        )
+        LOGGER.error("Ortho4XP script not found: %s", script_path, extra=log_extra)
         return 2
 
     resolved_python, version, error = probe_python_runtime(args.python_exe)
@@ -368,7 +445,8 @@ def main() -> int:
         config_updates["skip_downloads"] = True
 
     if not args.skip_dem_stage:
-        stage_custom_dem(ortho_root, args.tile, dem_path)
+        staged_path = stage_custom_dem(ortho_root, args.tile, dem_path)
+        _write_stage_metadata(output_dir, args.tile, staged_path)
 
     extra_args = list(args.ortho_args or [])
     if args.batch:
@@ -390,7 +468,7 @@ def main() -> int:
     config_path = ortho_root / "Ortho4XP.cfg"
     attempt = 1
     base_min_angle = _min_angle_from_config(config_path, config_updates)
-    result = _run_with_config(
+    result, config_diff = _run_with_config(
         config_path=config_path,
         config_updates=config_updates,
         cmd=cmd,
@@ -398,9 +476,9 @@ def main() -> int:
         persist_config=args.persist_config,
     )
     _write_logs(output_dir, args.tile, result, attempt=attempt)
-    if result.returncode != 0 and _needs_triangulation_retry(
-        result.stdout, result.stderr
-    ):
+    if config_diff:
+        _write_config_diff(output_dir, args.tile, config_diff, attempt=attempt)
+    if result.returncode != 0 and _needs_triangulation_retry(result.stdout, result.stderr):
         for min_angle in _retry_min_angles(base_min_angle):
             attempt += 1
             LOGGER.warning(
@@ -409,7 +487,7 @@ def main() -> int:
                 extra={**log_extra, "attempt": attempt, "min_angle": min_angle},
             )
             retry_updates = {**config_updates, "min_angle": min_angle}
-            result = _run_with_config(
+            result, config_diff = _run_with_config(
                 config_path=config_path,
                 config_updates=retry_updates,
                 cmd=cmd,
@@ -417,6 +495,8 @@ def main() -> int:
                 persist_config=args.persist_config,
             )
             _write_logs(output_dir, args.tile, result, attempt=attempt)
+            if config_diff:
+                _write_config_diff(output_dir, args.tile, config_diff, attempt=attempt)
             if result.returncode == 0:
                 break
     if result.returncode != 0:
@@ -427,9 +507,7 @@ def main() -> int:
         return result.returncode
 
     scenery_root = (
-        Path(args.scenery_root)
-        if args.scenery_root
-        else default_scenery_root(ortho_root)
+        Path(args.scenery_root) if args.scenery_root else default_scenery_root(ortho_root)
     )
     tile_dir = tile_scenery_dir(scenery_root, args.tile)
     if not tile_dir.exists():

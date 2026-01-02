@@ -7,6 +7,7 @@ import os
 import shutil
 import subprocess
 from pathlib import Path
+from typing import Any
 
 from dem2dsf import contracts
 from dem2dsf.backends.base import BackendSpec, BuildRequest, BuildResult
@@ -47,6 +48,7 @@ class Ortho4XPBackend:
             tiles=request.tiles,
             dem_paths=[str(path) for path in request.dem_paths],
             options=options,
+            aoi=options.get("aoi"),
         )
 
         runner = _normalize_runner(options.get("runner"))
@@ -94,10 +96,9 @@ class Ortho4XPBackend:
         if dem_path is None:
             errors.append("No DEM paths provided.")
 
-        if len(request.dem_paths) > 1:
+        tile_dem_paths = options.get("tile_dem_paths") or {}
+        if len(request.dem_paths) > 1 and not tile_dem_paths:
             warnings.append("Multiple DEMs provided; using the first for all tiles.")
-
-        tile_dem_paths = options.get("tile_dem_paths", {})
         normalization_errors = options.get("normalization_errors") or {}
         runner_timeout = options.get("runner_timeout")
         runner_retries = int(options.get("runner_retries", 0) or 0)
@@ -124,18 +125,14 @@ class Ortho4XPBackend:
                     {
                         "tile": tile,
                         "status": "error",
-                        "messages": [
-                            f"Normalization failed: {normalization_errors[tile]}"
-                        ],
+                        "messages": [f"Normalization failed: {normalization_errors[tile]}"],
                     }
                 )
                 errors.append(f"{tile}: normalization failed")
                 continue
             tile_dem = Path(tile_dem_paths.get(tile, dem_path)) if dem_path else None
             if tile_dem is None:
-                tile_statuses.append(
-                    {"tile": tile, "status": "error", "messages": ["missing DEM"]}
-                )
+                tile_statuses.append({"tile": tile, "status": "error", "messages": ["missing DEM"]})
                 continue
             if not tile_dem.exists():
                 tile_statuses.append(
@@ -168,7 +165,16 @@ class Ortho4XPBackend:
             else:
                 status = "warning" if status == "ok" else status
                 messages.append("DSF output not found")
-            tile_statuses.append({"tile": tile, "status": status, "messages": messages})
+            tile_entry = {"tile": tile, "status": status, "messages": messages}
+            metrics = tile_entry.setdefault("metrics", {})
+            metrics["runner_command"] = list(result.args)
+            staged_dem = _read_stage_metadata(request.output_dir, tile)
+            if staged_dem:
+                metrics["staged_dem"] = staged_dem
+            config_diff = _read_config_diff(request.output_dir, tile)
+            if config_diff:
+                metrics["ortho4xp_config_diff"] = config_diff.get("diff", config_diff)
+            tile_statuses.append(tile_entry)
 
         report = build_report(
             backend=self.spec(),
@@ -192,12 +198,55 @@ def _normalize_runner(value: object) -> list[str] | None:
 
 
 def _runner_log_paths(output_dir: Path, tile: str, attempt: int) -> tuple[Path, Path]:
+    """Return stdout/stderr log paths for a runner invocation."""
     log_dir = output_dir / "runner_logs"
     log_dir.mkdir(parents=True, exist_ok=True)
     suffix = "" if attempt <= 1 else f".attempt{attempt}"
     stdout_path = log_dir / f"backend_{tile}{suffix}.stdout.log"
     stderr_path = log_dir / f"backend_{tile}{suffix}.stderr.log"
     return stdout_path, stderr_path
+
+
+def _read_stage_metadata(output_dir: Path, tile: str) -> str | None:
+    """Load staged DEM metadata from the runner logs if present."""
+    path = output_dir / "runner_logs" / f"ortho4xp_{tile}.staged.json"
+    if not path.exists():
+        return None
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return None
+    staged = payload.get("staged_dem")
+    if isinstance(staged, str) and staged:
+        return staged
+    return None
+
+
+def _read_config_diff(output_dir: Path, tile: str) -> dict[str, Any] | None:
+    log_dir = output_dir / "runner_logs"
+    if not log_dir.exists():
+        return None
+    candidates: list[tuple[int, Path]] = []
+    base_path = log_dir / f"ortho4xp_{tile}.config.json"
+    if base_path.exists():
+        candidates.append((1, base_path))
+    for path in log_dir.glob(f"ortho4xp_{tile}.attempt*.config.json"):
+        name = path.name
+        attempt = 0
+        if ".attempt" in name:
+            suffix = name.split(".attempt", 1)[1]
+            attempt_str = suffix.split(".config", 1)[0]
+            if attempt_str.isdigit():
+                attempt = int(attempt_str)
+        candidates.append((attempt, path))
+    if not candidates:
+        return None
+    _attempt, path = max(candidates, key=lambda item: item[0])
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return None
+    return payload if isinstance(payload, dict) else None
 
 
 def _run_runner(
@@ -263,6 +312,7 @@ def _runner_supports_autoortho(runner: list[str]) -> bool:
 
 
 def _runner_flag_present(runner: list[str], flag: str) -> bool:
+    """Return True when a runner command already includes a flag."""
     for token in runner:
         if token == flag or token.startswith(f"{flag}="):
             return True
@@ -270,6 +320,7 @@ def _runner_flag_present(runner: list[str], flag: str) -> bool:
 
 
 def _validate_runner(runner: list[str]) -> str | None:
+    """Validate runner command configuration and return an error message."""
     binary = runner[0] if runner else ""
     if not binary:
         return "Runner command is empty."

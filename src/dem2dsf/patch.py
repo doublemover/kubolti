@@ -170,9 +170,7 @@ def apply_patch_to_tile(
     return output_path
 
 
-def _resolve_base_tile_path(
-    build_dir: Path, options: dict[str, Any], tile: str
-) -> Path:
+def _resolve_base_tile_path(build_dir: Path, options: dict[str, Any], tile: str) -> Path:
     """Resolve the base tile DEM path from build metadata."""
     tile_dem_paths = options.get("tile_dem_paths") or {}
     candidate = tile_dem_paths.get(tile)

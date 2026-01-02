@@ -5,6 +5,7 @@ from pathlib import Path
 from dem2dsf.dem.cache import (
     CACHE_VERSION,
     NormalizationCache,
+    SourceFingerprint,
     fingerprint_paths,
     load_normalization_cache,
     write_normalization_cache,
@@ -38,12 +39,14 @@ def test_normalization_cache_roundtrip(tmp_path: Path) -> None:
     }
     cache = NormalizationCache(
         version=CACHE_VERSION,
-        sources=fingerprint_paths([source]),
-        fallback_sources=fingerprint_paths([fallback]),
+        sources=fingerprint_paths([source], compute_sha256=True),
+        fallback_sources=fingerprint_paths([fallback], compute_sha256=True),
         options={"target_crs": "EPSG:4326"},
         tiles=("+47+008",),
         tile_paths={"+47+008": str(tile_path)},
+        tile_fingerprints={"+47+008": SourceFingerprint.from_path(tile_path, compute_sha256=True)},
         mosaic_path=str(mosaic_path),
+        mosaic_fingerprint=SourceFingerprint.from_path(mosaic_path, compute_sha256=True),
         coverage=coverage,
     )
 
@@ -56,5 +59,6 @@ def test_normalization_cache_roundtrip(tmp_path: Path) -> None:
         fallback_sources=[fallback],
         options={"target_crs": "EPSG:4326"},
         tiles=["+47+008"],
+        validate_hashes=True,
     )
     assert loaded.coverage["+47+008"].filled_pixels == 0

@@ -1,0 +1,17 @@
+{
+  "inputs": {
+    "dems": ["dem.tif"],
+    "tiles": ["+47+008"],
+    "aoi": "area.geojson",
+    "aoi_crs": "EPSG:4326"
+  },
+  "options": {
+    "quality": "compat",
+    "density": "medium",
+    "dsf_validation": "roundtrip"
+  },
+  "tools": {
+    "dsftool": ["DSFTool"],
+    "ddstool": ["DDSTool"]
+  }
+}

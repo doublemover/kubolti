@@ -1,4 +1,4 @@
-"""Schema validation helpers for build plan and report artifacts."""
+"""Schema validation helpers for build plan, report, and runner artifacts."""
 
 from __future__ import annotations
 
@@ -8,14 +8,13 @@ from typing import Any, Mapping
 
 import jsonschema
 
-SCHEMA_VERSION = "1.1"
+SCHEMA_VERSION = "1.2"
+RUNNER_EVENTS_SCHEMA_VERSION = "1"
 
 
 def _load_schema(name: str) -> dict[str, Any]:
     """Load a JSON schema bundled in the package."""
-    with resources.files("dem2dsf.schemas").joinpath(name).open(
-        "r", encoding="utf-8"
-    ) as handle:
+    with resources.files("dem2dsf.schemas").joinpath(name).open("r", encoding="utf-8") as handle:
         return json.load(handle)
 
 
@@ -29,3 +28,15 @@ def validate_build_report(report: Mapping[str, Any]) -> None:
     """Validate a build report against the schema."""
     schema = _load_schema("build_report.schema.json")
     jsonschema.validate(report, schema)
+
+
+def validate_runner_events(payload: Mapping[str, Any]) -> None:
+    """Validate runner event payloads against the schema."""
+    schema = _load_schema("runner_events.schema.json")
+    jsonschema.validate(payload, schema)
+
+
+def validate_build_config(config: Mapping[str, Any]) -> None:
+    """Validate a build config against the schema."""
+    schema = _load_schema("build_config.schema.json")
+    jsonschema.validate(config, schema)

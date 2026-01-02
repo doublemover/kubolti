@@ -1,4 +1,5 @@
 """Logging helpers for dem2dsf CLI and tools."""
+
 from __future__ import annotations
 
 import json
@@ -21,14 +22,12 @@ class LogOptions:
 
 
 def _timestamp() -> str:
-    return (
-        datetime.now(timezone.utc)
-        .isoformat(timespec="seconds")
-        .replace("+00:00", "Z")
-    )
+    """Return the current UTC timestamp in ISO8601 format."""
+    return datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
 
 
 def _extra_fields(record: logging.LogRecord) -> dict[str, Any]:
+    """Return non-standard LogRecord fields for JSON logging."""
     reserved = {
         "name",
         "msg",
@@ -52,17 +51,14 @@ def _extra_fields(record: logging.LogRecord) -> dict[str, Any]:
         "process",
         "message",
     }
-    return {
-        key: value
-        for key, value in record.__dict__.items()
-        if key not in reserved
-    }
+    return {key: value for key, value in record.__dict__.items() if key not in reserved}
 
 
 class JsonFormatter(logging.Formatter):
     """Format log records as JSON objects (one per line)."""
 
     def format(self, record: logging.LogRecord) -> str:
+        """Format a log record into JSON text."""
         payload: dict[str, Any] = {
             "timestamp": _timestamp(),
             "level": record.levelname.lower(),
@@ -81,6 +77,7 @@ class HumanFormatter(logging.Formatter):
     """Format log records with a concise, human readable prefix."""
 
     def format(self, record: logging.LogRecord) -> str:
+        """Format a log record with optional tile context."""
         message = super().format(record)
         tile = getattr(record, "tile", None)
         if tile:
@@ -89,6 +86,7 @@ class HumanFormatter(logging.Formatter):
 
 
 def _resolve_level(options: LogOptions) -> int:
+    """Resolve the log level for console output."""
     if options.quiet:
         return logging.WARNING
     if options.verbose > 0:

@@ -5,6 +5,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+import numpy as np
 import pytest
 
 from dem2dsf.wizard import (
@@ -17,6 +18,7 @@ from dem2dsf.wizard import (
     _prompt_optional_str,
     run_wizard,
 )
+from tests.utils import write_raster
 
 
 def test_wizard_defaults(tmp_path) -> None:
@@ -50,16 +52,23 @@ def test_wizard_interactive(monkeypatch, tmp_path) -> None:
         [
             "",  # stack path
             "dem.tif",
+            "",  # aoi path
             "+47+008",
             "",  # output dir
             "",  # runner override
             "",  # dsftool override
+            "",  # ddstool override
             "",  # runner timeout
             "",  # runner retries
             "",  # runner stream logs
             "",  # persist config
             "",  # dsftool timeout
             "",  # dsftool retries
+            "",  # dsf validation mode
+            "",  # dsf validation workers
+            "",  # validate all
+            "",  # dds validation mode
+            "",  # dds strict
             "",  # quality
             "",  # density
             "",  # autoortho
@@ -71,6 +80,8 @@ def test_wizard_interactive(monkeypatch, tmp_path) -> None:
             "constant",
             "5",
             "",  # mosaic strategy
+            "",  # normalized compression
+            "",  # cache sha256
             "",  # tile jobs
             "",  # continue on error
             "",  # coverage metrics
@@ -101,7 +112,12 @@ def test_wizard_interactive(monkeypatch, tmp_path) -> None:
 
 def test_wizard_interactive_stack(monkeypatch, tmp_path) -> None:
     layer_path = tmp_path / "layer.tif"
-    layer_path.write_text("stub", encoding="utf-8")
+    write_raster(
+        layer_path,
+        np.ones((2, 2), dtype=np.int16),
+        bounds=(0.0, 0.0, 1.0, 1.0),
+        nodata=-9999,
+    )
     stack_path = tmp_path / "stack.json"
     stack_path.write_text(
         json.dumps({"layers": [{"path": str(layer_path), "priority": 0}]}),
@@ -110,16 +126,23 @@ def test_wizard_interactive_stack(monkeypatch, tmp_path) -> None:
     inputs = iter(
         [
             str(stack_path),
+            "",  # aoi path
             "+47+008",
             "",  # output dir
             "",  # runner override
             "",  # dsftool override
+            "",  # ddstool override
             "",  # runner timeout
             "",  # runner retries
             "",  # runner stream logs
             "",  # persist config
             "",  # dsftool timeout
             "",  # dsftool retries
+            "",  # dsf validation mode
+            "",  # dsf validation workers
+            "",  # validate all
+            "",  # dds validation mode
+            "",  # dds strict
             "",  # quality
             "",  # density
             "",  # autoortho
@@ -130,6 +153,8 @@ def test_wizard_interactive_stack(monkeypatch, tmp_path) -> None:
             "",  # dst nodata
             "",  # fill strategy
             "",  # mosaic strategy
+            "",  # normalized compression
+            "",  # cache sha256
             "",  # tile jobs
             "",  # continue on error
             "",  # coverage metrics
@@ -162,18 +187,26 @@ def test_wizard_interactive_applies_options(monkeypatch, tmp_path) -> None:
         [
             "",  # stack path
             "dem.tif",
+            "",  # aoi path
             "+47+008",
             "custom_out",
             "python runner.py --demo",
             "dsftool.exe",
+            "ddstool.exe",
             "120",
             "2",
             "y",
             "y",
             "30",
             "3",
+            "bounds",
+            "8",
+            "y",
+            "ddstool",
+            "y",
             "xp12-enhanced",
             "high",
+            "y",
             "y",
             "n",
             "",  # target crs
@@ -182,6 +215,8 @@ def test_wizard_interactive_applies_options(monkeypatch, tmp_path) -> None:
             "1",
             "none",
             "per-tile",
+            "lzw",
+            "y",
             "4",
             "y",
             "y",
@@ -191,6 +226,7 @@ def test_wizard_interactive_applies_options(monkeypatch, tmp_path) -> None:
             "456",
             "y",
             "Global Scenery",
+            "y",
             "y",
             "y",
             "metrics.json",
@@ -220,15 +256,24 @@ def test_wizard_interactive_applies_options(monkeypatch, tmp_path) -> None:
     assert captured["quality"] == "xp12-enhanced"
     assert captured["density"] == "high"
     assert captured["autoortho"] is True
+    assert captured["autoortho_texture_strict"] is True
     assert captured["normalize"] is True
     assert captured["runner"][:3] == ["python", "runner.py", "--demo"]
     assert captured["dsftool"] == ["dsftool.exe"]
+    assert captured["ddstool"] == ["ddstool.exe"]
+    assert captured["dsf_validation"] == "bounds"
+    assert captured["dsf_validation_workers"] == 8
+    assert captured["validate_all"] is True
+    assert captured["dds_validation"] == "ddstool"
+    assert captured["dds_strict"] is True
     assert captured["dst_nodata"] == 1.0
     assert captured["tile_jobs"] == 4
     assert captured["triangle_warn"] == 123
     assert captured["triangle_max"] == 456
     assert captured["allow_triangle_overage"] is True
     assert captured["mosaic_strategy"] == "per-tile"
+    assert captured["normalized_compression"] == "lzw"
+    assert captured["cache_sha256"] is True
     assert captured["continue_on_error"] is True
     assert captured["coverage_metrics"] is True
     assert captured["coverage_min"] == 0.9
@@ -241,6 +286,7 @@ def test_wizard_interactive_applies_options(monkeypatch, tmp_path) -> None:
     assert captured["dsftool_retries"] == 3
     assert captured["global_scenery"] == "Global Scenery"
     assert captured["enrich_xp12"] is True
+    assert captured["xp12_strict"] is True
     assert captured["profile"] is True
     assert captured["metrics_json"] == "metrics.json"
     assert captured["bundle_diagnostics"] is True
@@ -281,7 +327,7 @@ def test_prompt_helpers(monkeypatch) -> None:
 
 
 def test_wizard_defaults_requires_tile(tmp_path) -> None:
-    with pytest.raises(ValueError, match="Defaults mode requires --tile"):
+    with pytest.raises(ValueError, match="Defaults mode requires --tile values or --infer-tiles"):
         run_wizard(
             dem_paths=["dem.tif"],
             tiles=None,
@@ -307,16 +353,23 @@ def test_wizard_fallback_requires_paths(monkeypatch, tmp_path) -> None:
         [
             "",  # stack path
             "dem.tif",
+            "",  # aoi path
             "+47+008",
             "",  # output dir
             "",  # runner override
             "",  # dsftool override
+            "",  # ddstool override
             "",  # runner timeout
             "",  # runner retries
             "",  # runner stream logs
             "",  # persist config
             "",  # dsftool timeout
             "",  # dsftool retries
+            "",  # dsf validation mode
+            "",  # dsf validation workers
+            "",  # validate all
+            "",  # dds validation mode
+            "",  # dds strict
             "",  # quality
             "",  # density
             "",  # autoortho
@@ -361,7 +414,7 @@ def test_wizard_defaults_runs_build(monkeypatch, tmp_path) -> None:
 
 
 def test_wizard_requires_tiles(monkeypatch, tmp_path) -> None:
-    inputs = iter(["", "dem.tif", ""])
+    inputs = iter(["", "dem.tif", "", ""])
     monkeypatch.setattr("builtins.input", lambda *_: next(inputs))
 
     with pytest.raises(ValueError, match="Wizard requires tiles"):

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import shlex
 import shutil
@@ -11,9 +12,13 @@ from pathlib import Path
 from typing import Any
 
 from dem2dsf.build import run_build
+from dem2dsf.dem.info import inspect_dem
+from dem2dsf.dem.stack import load_dem_stack
+from dem2dsf.dem.tiling import tile_bounds
 from dem2dsf.density import DENSITY_PRESETS
 from dem2dsf.presets import get_preset, list_presets
 from dem2dsf.publish import publish_build
+from dem2dsf.tile_inference import infer_tiles
 from dem2dsf.tools.config import load_tool_paths, ortho_root_from_paths
 from dem2dsf.xplane_paths import parse_tile
 
@@ -55,6 +60,89 @@ def _invalid_tiles(tiles: list[str]) -> list[str]:
         except ValueError:
             invalid.append(tile)
     return invalid
+
+
+def _resolution_to_meters(info: object) -> float | None:
+    crs = getattr(info, "crs", None)
+    if crs is None:
+        return None
+    res_x, res_y = getattr(info, "resolution", (None, None))
+    if res_x is None or res_y is None:
+        return None
+    if str(crs).upper() in {"EPSG:4326", "EPSG:4258"}:
+        bounds = getattr(info, "bounds", None)
+        if bounds:
+            mid_lat = (bounds[1] + bounds[3]) / 2.0
+            meters_per_deg_lat = 111_320.0
+            meters_per_deg_lon = meters_per_deg_lat * math.cos(math.radians(mid_lat))
+            if meters_per_deg_lon <= 0:
+                meters_per_deg_lon = meters_per_deg_lat
+            return max(res_x * meters_per_deg_lon, res_y * meters_per_deg_lat)
+    return max(res_x, res_y)
+
+
+def _recommend_resolution(dem_paths: list[Path]) -> float | None:
+    resolutions: list[float] = []
+    for path in dem_paths:
+        if not path.exists():
+            continue
+        info = inspect_dem(path)
+        resolution = _resolution_to_meters(info)
+        if resolution is not None:
+            resolutions.append(resolution)
+    return min(resolutions) if resolutions else None
+
+
+def _estimate_triangles(tiles: list[str], resolution_m: float) -> int | None:
+    if resolution_m <= 0:
+        return None
+    total = 0
+    meters_per_deg_lat = 111_320.0
+    for tile in tiles:
+        min_lon, min_lat, max_lon, max_lat = tile_bounds(tile)
+        mid_lat = (min_lat + max_lat) / 2.0
+        meters_per_deg_lon = meters_per_deg_lat * math.cos(math.radians(mid_lat))
+        if meters_per_deg_lon <= 0:
+            meters_per_deg_lon = meters_per_deg_lat
+        width_m = (max_lon - min_lon) * meters_per_deg_lon
+        height_m = (max_lat - min_lat) * meters_per_deg_lat
+        if width_m <= 0 or height_m <= 0:
+            continue
+        cells_x = max(1, int(width_m / resolution_m))
+        cells_y = max(1, int(height_m / resolution_m))
+        total += max(1, cells_x - 1) * max(1, cells_y - 1) * 2
+    return total
+
+
+def _build_warnings(
+    dem_paths: list[Path],
+    tiles: list[str],
+    options: dict[str, Any],
+) -> list[str]:
+    warnings: list[str] = []
+    resolution = options.get("target_resolution")
+    if resolution is None:
+        recommended = _recommend_resolution(dem_paths)
+        if recommended is not None:
+            warnings.append(
+                f"Suggested target resolution ~{recommended:.1f}m based on DEM resolution."
+            )
+            resolution = recommended
+    if resolution is not None and resolution <= 5:
+        warnings.append(
+            f"Target resolution {resolution:.2f}m is very fine; expect high triangle counts."
+        )
+    if resolution is not None and tiles:
+        triangle_estimate = _estimate_triangles(tiles, float(resolution))
+        if triangle_estimate:
+            size_gb = triangle_estimate * 48 / (1024**3)
+            warnings.append(
+                f"Rough mesh estimate: {triangle_estimate / 1_000_000:.1f}M triangles "
+                f"(~{size_gb:.1f} GB mesh data)."
+            )
+            if triangle_estimate >= 5_000_000 or size_gb >= 5:
+                warnings.append("Large build detected; expect long runtimes and heavy disk usage.")
+    return warnings
 
 
 def default_gui_prefs_path() -> Path:
@@ -101,11 +189,8 @@ def load_gui_prefs(path: Path | None = None) -> dict[str, dict[str, Any]]:
 
 def save_gui_prefs(payload: dict[str, dict[str, Any]], path: Path | None = None) -> Path:
     """Persist GUI preferences to disk and return the path."""
-    output_path = (
-        Path(os.environ.get(ENV_GUI_PREFS))
-        if os.environ.get(ENV_GUI_PREFS)
-        else (path or default_gui_prefs_path())
-    )
+    env_path = os.environ.get(ENV_GUI_PREFS)
+    output_path = Path(env_path) if env_path else (path or default_gui_prefs_path())
     output_path.parent.mkdir(parents=True, exist_ok=True)
     wrapped = {
         "version": GUI_PREFS_VERSION,
@@ -161,13 +246,12 @@ def _apply_tool_defaults(
     *,
     ortho_root: str | None,
     dsftool_path: str | None,
+    ddstool_path: str | None,
 ) -> None:
     """Fill tool defaults from tool_paths.json when GUI fields are empty."""
     tool_paths = load_tool_paths()
     if options.get("runner") is None:
-        ortho_root_path = (
-            Path(ortho_root) if ortho_root else ortho_root_from_paths(tool_paths)
-        )
+        ortho_root_path = Path(ortho_root) if ortho_root else ortho_root_from_paths(tool_paths)
         runner = _default_ortho_runner()
         if ortho_root_path and runner:
             options["runner"] = [*runner, "--ortho-root", str(ortho_root_path)]
@@ -175,9 +259,14 @@ def _apply_tool_defaults(
         candidate = Path(dsftool_path) if dsftool_path else tool_paths.get("dsftool")
         if candidate:
             options["dsftool"] = [str(candidate)]
+    if options.get("ddstool") is None:
+        candidate = Path(ddstool_path) if ddstool_path else tool_paths.get("ddstool")
+        if candidate:
+            options["ddstool"] = [str(candidate)]
 
 
 def _runner_has_flag(runner: list[str], flag: str) -> bool:
+    """Return True when a runner command already includes a flag."""
     for token in runner:
         if token == flag or token.startswith(f"{flag}="):
             return True
@@ -192,6 +281,7 @@ def _apply_runner_overrides(
     ortho_batch: bool,
     persist_config: bool,
 ) -> None:
+    """Inject runner flags based on GUI overrides."""
     runner = options.get("runner")
     if not runner:
         return
@@ -213,27 +303,31 @@ def build_form_to_request(
     dem_stack = values.get("dem_stack") or ""
     tiles = parse_list(values.get("tiles", ""))
     output_dir = Path(values.get("output_dir") or "build")
+    tile_jobs_value = parse_optional_int(values.get("tile_jobs", ""))
+    tile_jobs = 1 if tile_jobs_value is None else tile_jobs_value
     options = {
         "quality": values.get("quality", "compat"),
         "density": values.get("density", "medium"),
         "autoortho": bool(values.get("autoortho", False)),
+        "autoortho_texture_strict": bool(values.get("autoortho_texture_strict", False)),
+        "aoi": values.get("aoi_path") or None,
+        "aoi_crs": values.get("aoi_crs") or None,
+        "infer_tiles": bool(values.get("infer_tiles", False)),
         "target_crs": values.get("target_crs") or "EPSG:4326",
         "resampling": values.get("resampling", "bilinear"),
-        "target_resolution": parse_optional_float(
-            values.get("target_resolution", "")
-        ),
+        "target_resolution": parse_optional_float(values.get("target_resolution", "")),
         "dst_nodata": parse_optional_float(values.get("dst_nodata", "")),
         "fill_strategy": values.get("fill_strategy", "none"),
-        "fill_value": parse_optional_float(values.get("fill_value", "") or "0")
-        or 0.0,
+        "fill_value": parse_optional_float(values.get("fill_value", "") or "0") or 0.0,
         "fallback_dem_paths": parse_list(values.get("fallback_dems", "")),
         "normalize": not bool(values.get("skip_normalize", False)),
-        "tile_jobs": parse_optional_int(values.get("tile_jobs", "") or "1") or 1,
+        "tile_jobs": tile_jobs,
         "triangle_warn": parse_optional_int(values.get("triangle_warn", "")),
         "triangle_max": parse_optional_int(values.get("triangle_max", "")),
         "allow_triangle_overage": bool(values.get("allow_triangle_overage", False)),
         "global_scenery": values.get("global_scenery") or None,
         "enrich_xp12": bool(values.get("enrich_xp12", False)),
+        "xp12_strict": bool(values.get("xp12_strict", False)),
         "profile": bool(values.get("profile", False)),
         "metrics_json": values.get("metrics_json") or None,
         "dem_stack_path": dem_stack or None,
@@ -244,12 +338,15 @@ def build_form_to_request(
         "coverage_hard_fail": bool(values.get("coverage_hard_fail", False)),
         "coverage_metrics": bool(values.get("coverage_metrics", True)),
         "runner_timeout": parse_optional_float(values.get("runner_timeout", "")),
-        "runner_retries": parse_optional_int(values.get("runner_retries", "") or "0")
-        or 0,
+        "runner_retries": parse_optional_int(values.get("runner_retries", "") or "0") or 0,
         "runner_stream_logs": bool(values.get("runner_stream_logs", False)),
         "dsftool_timeout": parse_optional_float(values.get("dsftool_timeout", "")),
-        "dsftool_retries": parse_optional_int(values.get("dsftool_retries", "") or "0")
-        or 0,
+        "dsftool_retries": parse_optional_int(values.get("dsftool_retries", "") or "0") or 0,
+        "dsf_validation": values.get("dsf_validation") or "roundtrip",
+        "dsf_validation_workers": parse_optional_int(values.get("dsf_validation_workers", "")),
+        "validate_all": bool(values.get("validate_all", False)),
+        "dds_validation": values.get("dds_validation") or "none",
+        "dds_strict": bool(values.get("dds_strict", False)),
         "bundle_diagnostics": bool(values.get("bundle_diagnostics", False)),
     }
     ortho_root = values.get("ortho_root") or None
@@ -257,6 +354,7 @@ def build_form_to_request(
     ortho_batch = bool(values.get("ortho_batch", False))
     persist_config = bool(values.get("persist_config", False))
     dsftool_path = values.get("dsftool_path") or None
+    ddstool_path = values.get("ddstool_path") or None
     runner_override = parse_command(values.get("runner_cmd", ""))
     if runner_override:
         options["runner"] = runner_override
@@ -266,10 +364,13 @@ def build_form_to_request(
             options["runner"] = [*runner, "--ortho-root", str(ortho_root)]
     if dsftool_path:
         options["dsftool"] = [dsftool_path]
+    if ddstool_path:
+        options["ddstool"] = [ddstool_path]
     _apply_tool_defaults(
         options,
         ortho_root=ortho_root,
         dsftool_path=dsftool_path,
+        ddstool_path=ddstool_path,
     )
     _apply_runner_overrides(
         options,
@@ -289,6 +390,7 @@ def publish_form_to_request(
     output_zip = Path(values.get("output_zip") or "build.zip")
     sevenzip = values.get("sevenzip_path")
     options = {
+        "mode": values.get("mode") or "full",
         "dsf_7z": bool(values.get("dsf_7z", False)),
         "dsf_7z_backup": bool(values.get("dsf_7z_backup", False)),
         "sevenzip_path": Path(sevenzip) if sevenzip else None,
@@ -319,11 +421,15 @@ def launch_gui() -> None:
         "preset": tk.StringVar(),
         "dems": tk.StringVar(),
         "dem_stack": tk.StringVar(),
+        "aoi_path": tk.StringVar(),
+        "aoi_crs": tk.StringVar(),
         "tiles": tk.StringVar(),
+        "infer_tiles": tk.BooleanVar(value=False),
         "output_dir": tk.StringVar(value="build"),
         "quality": tk.StringVar(value="compat"),
         "density": tk.StringVar(value="medium"),
         "autoortho": tk.BooleanVar(value=False),
+        "autoortho_texture_strict": tk.BooleanVar(value=False),
         "skip_normalize": tk.BooleanVar(value=False),
         "tile_jobs": tk.StringVar(value="1"),
         "triangle_warn": tk.StringVar(),
@@ -334,6 +440,12 @@ def launch_gui() -> None:
         "ortho_python": tk.StringVar(),
         "ortho_batch": tk.BooleanVar(value=False),
         "dsftool_path": tk.StringVar(),
+        "ddstool_path": tk.StringVar(),
+        "dsf_validation": tk.StringVar(value="roundtrip"),
+        "dsf_validation_workers": tk.StringVar(),
+        "validate_all": tk.BooleanVar(value=False),
+        "dds_validation": tk.StringVar(value="none"),
+        "dds_strict": tk.BooleanVar(value=False),
         "target_crs": tk.StringVar(value="EPSG:4326"),
         "resampling": tk.StringVar(value="bilinear"),
         "target_resolution": tk.StringVar(),
@@ -343,6 +455,7 @@ def launch_gui() -> None:
         "fallback_dems": tk.StringVar(),
         "global_scenery": tk.StringVar(),
         "enrich_xp12": tk.BooleanVar(value=False),
+        "xp12_strict": tk.BooleanVar(value=False),
         "profile": tk.BooleanVar(value=False),
         "metrics_json": tk.StringVar(),
         "dry_run": tk.BooleanVar(value=False),
@@ -363,6 +476,7 @@ def launch_gui() -> None:
     publish_vars = {
         "build_dir": tk.StringVar(value="build"),
         "output_zip": tk.StringVar(value="build.zip"),
+        "mode": tk.StringVar(value="full"),
         "dsf_7z": tk.BooleanVar(value=False),
         "dsf_7z_backup": tk.BooleanVar(value=False),
         "sevenzip_path": tk.StringVar(),
@@ -373,16 +487,19 @@ def launch_gui() -> None:
     _apply_prefs(publish_vars, prefs.get("publish", {}))
 
     def log_message(text: str) -> None:
+        """Append a line to the GUI log widget."""
         log.insert("end", text + "\n")
         log.see("end")
 
     def save_preferences() -> None:
+        """Persist GUI preferences and log failures."""
         try:
             save_gui_prefs(_collect_prefs(build_vars, publish_vars))
         except (OSError, ValueError, TypeError):
             log_message("Failed to save GUI preferences.")
 
     def apply_preset() -> None:
+        """Apply the selected preset to build fields."""
         preset_name = build_vars["preset"].get()
         preset = get_preset(preset_name or "")
         if not preset:
@@ -394,11 +511,13 @@ def launch_gui() -> None:
         log_message(f"Applied preset: {preset.name}")
 
     def browse_dems() -> None:
+        """Open a file chooser for DEM inputs."""
         paths = filedialog.askopenfilenames(title="Select DEM files")
         if paths:
             build_vars["dems"].set(", ".join(paths))
 
     def browse_dem_stack() -> None:
+        """Open a file chooser for DEM stack definitions."""
         path = filedialog.askopenfilename(
             title="Select DEM stack JSON",
             filetypes=[("JSON files", "*.json"), ("All files", "*.*")],
@@ -406,39 +525,61 @@ def launch_gui() -> None:
         if path:
             build_vars["dem_stack"].set(path)
 
+    def browse_aoi() -> None:
+        path = filedialog.askopenfilename(
+            title="Select AOI polygon",
+            filetypes=[
+                ("GeoJSON", "*.json;*.geojson"),
+                ("Shapefile", "*.shp"),
+                ("All files", "*.*"),
+            ],
+        )
+        if path:
+            build_vars["aoi_path"].set(path)
+
     def browse_output_dir() -> None:
+        """Open a directory chooser for build output."""
         path = filedialog.askdirectory(title="Select output directory")
         if path:
             build_vars["output_dir"].set(path)
 
     def browse_ortho_root() -> None:
+        """Open a directory chooser for the Ortho4XP root."""
         path = filedialog.askdirectory(title="Select Ortho4XP root")
         if path:
             build_vars["ortho_root"].set(path)
 
     def browse_ortho_python() -> None:
-        path = filedialog.askopenfilename(
-            title="Select Ortho4XP Python executable"
-        )
+        """Open a file chooser for the Ortho4XP Python runtime."""
+        path = filedialog.askopenfilename(title="Select Ortho4XP Python executable")
         if path:
             build_vars["ortho_python"].set(path)
 
     def browse_dsftool() -> None:
+        """Open a file chooser for the DSFTool executable."""
         path = filedialog.askopenfilename(title="Select DSFTool executable")
         if path:
             build_vars["dsftool_path"].set(path)
 
+    def browse_ddstool() -> None:
+        path = filedialog.askopenfilename(title="Select DDSTool executable")
+        if path:
+            build_vars["ddstool_path"].set(path)
+
     def browse_fallback() -> None:
+        """Open a file chooser for fallback DEMs."""
         paths = filedialog.askopenfilenames(title="Select fallback DEMs")
         if paths:
             build_vars["fallback_dems"].set(", ".join(paths))
 
     def browse_global_scenery() -> None:
+        """Open a directory chooser for Global Scenery."""
         path = filedialog.askdirectory(title="Select Global Scenery folder")
         if path:
             build_vars["global_scenery"].set(path)
 
     def browse_metrics_json() -> None:
+        """Open a save dialog for metrics JSON output."""
         path = filedialog.asksaveasfilename(
             title="Save metrics JSON",
             defaultextension=".json",
@@ -447,16 +588,54 @@ def launch_gui() -> None:
         if path:
             build_vars["metrics_json"].set(path)
 
+    def _infer_tiles_for_values(values: dict[str, Any]):
+        dem_paths = [Path(path) for path in parse_list(values.get("dems", ""))]
+        dem_stack = values.get("dem_stack") or ""
+        if not dem_paths and dem_stack:
+            stack = load_dem_stack(Path(dem_stack))
+            dem_paths = [layer.path for layer in stack.layers]
+        if not dem_paths:
+            raise ValueError("Provide DEMs or a DEM stack to infer tiles.")
+        aoi_path = values.get("aoi_path") or None
+        aoi_crs = values.get("aoi_crs") or None
+        return infer_tiles(
+            dem_paths,
+            aoi_path=Path(aoi_path) if aoi_path else None,
+            aoi_crs=aoi_crs or None,
+        )
+
+    def on_infer_tiles() -> None:
+        values = {key: var.get() for key, var in build_vars.items()}
+        try:
+            inference = _infer_tiles_for_values(values)
+        except Exception as exc:
+            messagebox.showerror("Tile inference failed", str(exc))
+            return
+        if inference.warnings:
+            for warning in inference.warnings:
+                log_message(f"Warning: {warning}")
+        build_vars["tiles"].set(", ".join(inference.tiles))
+        log_message(f"Inferred {len(inference.tiles)} tile(s).")
+
     def on_build() -> None:
+        """Run a build using the current GUI field values."""
         values = {key: var.get() for key, var in build_vars.items()}
         try:
             dem_paths, tiles, output_dir, options = build_form_to_request(values)
-            if not tiles:
-                messagebox.showerror("Missing input", "Provide tile names.")
-                return
             if not dem_paths and not options.get("dem_stack_path"):
+                messagebox.showerror("Missing input", "Provide DEMs or a DEM stack.")
+                return
+            if not tiles and options.get("infer_tiles"):
+                inference = _infer_tiles_for_values(values)
+                if inference.warnings:
+                    for warning in inference.warnings:
+                        log_message(f"Warning: {warning}")
+                tiles = inference.tiles
+                build_vars["tiles"].set(", ".join(tiles))
+            if not tiles:
                 messagebox.showerror(
-                    "Missing input", "Provide DEMs or a DEM stack."
+                    "Missing input",
+                    "Provide tile names or enable tile inference.",
                 )
                 return
             invalid_tiles = _invalid_tiles(tiles)
@@ -466,6 +645,8 @@ def launch_gui() -> None:
                     f"Invalid tile name(s): {', '.join(invalid_tiles)}",
                 )
                 return
+            for warning in _build_warnings(dem_paths, tiles, options):
+                log_message(f"Warning: {warning}")
             run_build(
                 dem_paths=dem_paths,
                 tiles=tiles,
@@ -479,6 +660,7 @@ def launch_gui() -> None:
             messagebox.showerror("Build failed", str(exc))
 
     def on_publish() -> None:
+        """Run a publish using the current GUI field values."""
         values = {key: var.get() for key, var in publish_vars.items()}
         try:
             build_dir, output_zip, options = publish_form_to_request(values)
@@ -495,13 +677,13 @@ def launch_gui() -> None:
         except Exception as exc:
             messagebox.showerror("Publish failed", str(exc))
 
-    def add_row(parent, label, widget, row) -> None:
-        ttk.Label(parent, text=label).grid(
-            row=row, column=0, sticky="w", padx=4, pady=4
-        )
+    def add_row(parent: Any, label: str, widget: Any, row: int) -> None:
+        """Add a labeled widget row to the provided parent frame."""
+        ttk.Label(parent, text=label).grid(row=row, column=0, sticky="w", padx=4, pady=4)
         widget.grid(row=row, column=1, sticky="ew", padx=4, pady=4)
 
-    def add_row_with_button(parent, label, widget, row, button) -> None:
+    def add_row_with_button(parent: Any, label: str, widget: Any, row: int, button: Any) -> None:
+        """Add a labeled widget row with an extra action button."""
         add_row(parent, label, widget, row)
         button.grid(row=row, column=2, sticky="e", padx=4, pady=4)
 
@@ -541,8 +723,37 @@ def launch_gui() -> None:
         ttk.Button(build_frame, text="Browse", command=browse_dem_stack),
     )
     row += 1
+    aoi_entry = ttk.Entry(build_frame, textvariable=build_vars["aoi_path"])
+    add_row_with_button(
+        build_frame,
+        "AOI polygon (optional)",
+        aoi_entry,
+        row,
+        ttk.Button(build_frame, text="Browse", command=browse_aoi),
+    )
+    row += 1
+    aoi_crs_entry = ttk.Entry(build_frame, textvariable=build_vars["aoi_crs"])
+    add_row(
+        build_frame,
+        "AOI CRS (optional, preferred: EPSG:4326)",
+        aoi_crs_entry,
+        row,
+    )
+    row += 1
     tiles_entry = ttk.Entry(build_frame, textvariable=build_vars["tiles"])
-    add_row(build_frame, "Tiles (comma-separated)", tiles_entry, row)
+    add_row_with_button(
+        build_frame,
+        "Tiles (comma-separated)",
+        tiles_entry,
+        row,
+        ttk.Button(build_frame, text="Infer", command=on_infer_tiles),
+    )
+    row += 1
+    ttk.Checkbutton(
+        build_frame,
+        text="Infer tiles from DEM/AOI when empty",
+        variable=build_vars["infer_tiles"],
+    ).grid(row=row, column=1, sticky="w", padx=4, pady=4)
     row += 1
     output_entry = ttk.Entry(build_frame, textvariable=build_vars["output_dir"])
     add_row_with_button(
@@ -575,6 +786,12 @@ def launch_gui() -> None:
     row += 1
     ttk.Checkbutton(
         build_frame,
+        text="AutoOrtho textures strict",
+        variable=build_vars["autoortho_texture_strict"],
+    ).grid(row=row, column=1, sticky="w", padx=4, pady=4)
+    row += 1
+    ttk.Checkbutton(
+        build_frame,
         text="Skip normalization",
         variable=build_vars["skip_normalize"],
     ).grid(row=row, column=1, sticky="w", padx=4, pady=4)
@@ -582,7 +799,7 @@ def launch_gui() -> None:
     mosaic_box = ttk.Combobox(
         build_frame,
         textvariable=build_vars["mosaic_strategy"],
-        values=["full", "per-tile"],
+        values=["full", "per-tile", "vrt"],
     )
     add_row(build_frame, "Mosaic strategy", mosaic_box, row)
     row += 1
@@ -610,14 +827,10 @@ def launch_gui() -> None:
         variable=build_vars["coverage_metrics"],
     ).grid(row=row, column=1, sticky="w", padx=4, pady=4)
     row += 1
-    triangle_warn_entry = ttk.Entry(
-        build_frame, textvariable=build_vars["triangle_warn"]
-    )
+    triangle_warn_entry = ttk.Entry(build_frame, textvariable=build_vars["triangle_warn"])
     add_row(build_frame, "Triangle warn threshold", triangle_warn_entry, row)
     row += 1
-    triangle_max_entry = ttk.Entry(
-        build_frame, textvariable=build_vars["triangle_max"]
-    )
+    triangle_max_entry = ttk.Entry(build_frame, textvariable=build_vars["triangle_max"])
     add_row(build_frame, "Triangle max threshold", triangle_max_entry, row)
     row += 1
     ttk.Checkbutton(
@@ -629,14 +842,10 @@ def launch_gui() -> None:
     runner_entry = ttk.Entry(build_frame, textvariable=build_vars["runner_cmd"])
     add_row(build_frame, "Runner override", runner_entry, row)
     row += 1
-    runner_timeout_entry = ttk.Entry(
-        build_frame, textvariable=build_vars["runner_timeout"]
-    )
+    runner_timeout_entry = ttk.Entry(build_frame, textvariable=build_vars["runner_timeout"])
     add_row(build_frame, "Runner timeout (s)", runner_timeout_entry, row)
     row += 1
-    runner_retries_entry = ttk.Entry(
-        build_frame, textvariable=build_vars["runner_retries"]
-    )
+    runner_retries_entry = ttk.Entry(build_frame, textvariable=build_vars["runner_retries"])
     add_row(build_frame, "Runner retries", runner_retries_entry, row)
     row += 1
     ttk.Checkbutton(
@@ -660,9 +869,7 @@ def launch_gui() -> None:
         ttk.Button(build_frame, text="Browse", command=browse_ortho_root),
     )
     row += 1
-    ortho_python_entry = ttk.Entry(
-        build_frame, textvariable=build_vars["ortho_python"]
-    )
+    ortho_python_entry = ttk.Entry(build_frame, textvariable=build_vars["ortho_python"])
     add_row_with_button(
         build_frame,
         "Ortho4XP python",
@@ -686,15 +893,49 @@ def launch_gui() -> None:
         ttk.Button(build_frame, text="Browse", command=browse_dsftool),
     )
     row += 1
-    dsftool_timeout_entry = ttk.Entry(
-        build_frame, textvariable=build_vars["dsftool_timeout"]
+    ddstool_entry = ttk.Entry(build_frame, textvariable=build_vars["ddstool_path"])
+    add_row_with_button(
+        build_frame,
+        "DDSTool path",
+        ddstool_entry,
+        row,
+        ttk.Button(build_frame, text="Browse", command=browse_ddstool),
     )
+    row += 1
+    dsftool_timeout_entry = ttk.Entry(build_frame, textvariable=build_vars["dsftool_timeout"])
     add_row(build_frame, "DSFTool timeout (s)", dsftool_timeout_entry, row)
     row += 1
-    dsftool_retries_entry = ttk.Entry(
-        build_frame, textvariable=build_vars["dsftool_retries"]
-    )
+    dsftool_retries_entry = ttk.Entry(build_frame, textvariable=build_vars["dsftool_retries"])
     add_row(build_frame, "DSFTool retries", dsftool_retries_entry, row)
+    row += 1
+    dsf_validation_box = ttk.Combobox(
+        build_frame,
+        textvariable=build_vars["dsf_validation"],
+        values=["roundtrip", "bounds", "none"],
+    )
+    add_row(build_frame, "DSF validation", dsf_validation_box, row)
+    row += 1
+    dsf_workers_entry = ttk.Entry(build_frame, textvariable=build_vars["dsf_validation_workers"])
+    add_row(build_frame, "DSF validation workers", dsf_workers_entry, row)
+    row += 1
+    ttk.Checkbutton(
+        build_frame,
+        text="Validate all tiles",
+        variable=build_vars["validate_all"],
+    ).grid(row=row, column=1, sticky="w", padx=4, pady=4)
+    row += 1
+    dds_validation_box = ttk.Combobox(
+        build_frame,
+        textvariable=build_vars["dds_validation"],
+        values=["none", "header", "ddstool"],
+    )
+    add_row(build_frame, "DDS validation", dds_validation_box, row)
+    row += 1
+    ttk.Checkbutton(
+        build_frame,
+        text="DDS validation strict",
+        variable=build_vars["dds_strict"],
+    ).grid(row=row, column=1, sticky="w", padx=4, pady=4)
     row += 1
     target_crs_entry = ttk.Entry(build_frame, textvariable=build_vars["target_crs"])
     add_row(build_frame, "Target CRS", target_crs_entry, row)
@@ -706,9 +947,7 @@ def launch_gui() -> None:
     )
     add_row(build_frame, "Resampling", resampling_box, row)
     row += 1
-    target_res_entry = ttk.Entry(
-        build_frame, textvariable=build_vars["target_resolution"]
-    )
+    target_res_entry = ttk.Entry(build_frame, textvariable=build_vars["target_resolution"])
     add_row(build_frame, "Target resolution (m)", target_res_entry, row)
     row += 1
     dst_nodata_entry = ttk.Entry(build_frame, textvariable=build_vars["dst_nodata"])
@@ -747,8 +986,14 @@ def launch_gui() -> None:
     ).grid(row=row, column=1, sticky="w", padx=4, pady=4)
     row += 1
     ttk.Checkbutton(
-        build_frame, text="Profile build", variable=build_vars["profile"]
+        build_frame,
+        text="XP12 raster strict",
+        variable=build_vars["xp12_strict"],
     ).grid(row=row, column=1, sticky="w", padx=4, pady=4)
+    row += 1
+    ttk.Checkbutton(build_frame, text="Profile build", variable=build_vars["profile"]).grid(
+        row=row, column=1, sticky="w", padx=4, pady=4
+    )
     row += 1
     metrics_entry = ttk.Entry(build_frame, textvariable=build_vars["metrics_json"])
     add_row_with_button(
@@ -765,9 +1010,9 @@ def launch_gui() -> None:
         variable=build_vars["bundle_diagnostics"],
     ).grid(row=row, column=1, sticky="w", padx=4, pady=4)
     row += 1
-    ttk.Checkbutton(
-        build_frame, text="Dry run", variable=build_vars["dry_run"]
-    ).grid(row=row, column=1, sticky="w", padx=4, pady=4)
+    ttk.Checkbutton(build_frame, text="Dry run", variable=build_vars["dry_run"]).grid(
+        row=row, column=1, sticky="w", padx=4, pady=4
+    )
     row += 1
     ttk.Button(build_frame, text="Run Build", command=on_build).grid(
         row=row, column=1, sticky="e", padx=4, pady=8
@@ -786,9 +1031,8 @@ def launch_gui() -> None:
             publish_frame,
             text="Browse",
             command=lambda: publish_vars["build_dir"].set(
-                filedialog.askdirectory(title="Select build directory") or publish_vars[
-                    "build_dir"
-                ].get()
+                filedialog.askdirectory(title="Select build directory")
+                or publish_vars["build_dir"].get()
             ),
         ),
     )
@@ -810,11 +1054,17 @@ def launch_gui() -> None:
             ),
         ),
     )
+    mode_box = ttk.Combobox(
+        publish_frame,
+        textvariable=publish_vars["mode"],
+        values=["full", "scenery"],
+    )
+    add_row(publish_frame, "Publish mode", mode_box, 2)
     add_row_with_button(
         publish_frame,
         "7z path",
         sevenzip_entry,
-        2,
+        3,
         ttk.Button(
             publish_frame,
             text="Browse",
@@ -828,25 +1078,26 @@ def launch_gui() -> None:
         publish_frame,
         text="Compress DSFs (7z)",
         variable=publish_vars["dsf_7z"],
-    ).grid(row=3, column=1, sticky="w", padx=4, pady=4)
+    ).grid(row=4, column=1, sticky="w", padx=4, pady=4)
     ttk.Checkbutton(
         publish_frame,
         text="Keep uncompressed DSF backups",
         variable=publish_vars["dsf_7z_backup"],
-    ).grid(row=4, column=1, sticky="w", padx=4, pady=4)
+    ).grid(row=5, column=1, sticky="w", padx=4, pady=4)
     ttk.Checkbutton(
         publish_frame,
         text="Allow missing 7z",
         variable=publish_vars["allow_missing_7z"],
-    ).grid(row=5, column=1, sticky="w", padx=4, pady=4)
+    ).grid(row=6, column=1, sticky="w", padx=4, pady=4)
     ttk.Button(publish_frame, text="Publish", command=on_publish).grid(
-        row=6, column=1, sticky="e", padx=4, pady=8
+        row=7, column=1, sticky="e", padx=4, pady=8
     )
 
     log = tk.Text(root, height=6, width=80)
     log.pack(fill="both", expand=False, padx=10, pady=10)
 
     def on_close() -> None:
+        """Save preferences and close the GUI."""
         save_preferences()
         root.destroy()
 

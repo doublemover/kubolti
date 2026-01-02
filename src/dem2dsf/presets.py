@@ -37,9 +37,7 @@ _PRESETS: dict[str, Preset] = {
             "target_crs": "EPSG:4326",
             "fill_strategy": "none",
         },
-        notes=(
-            "Good default for continental US tiles; adjust density per area.",
-        ),
+        notes=("Good default for continental US tiles; adjust density per area.",),
         example=(
             "python -m dem2dsf build --dem <usgs_dem.tif> --tile +DD+DDD "
             "--density high --resampling bilinear"
@@ -57,9 +55,7 @@ _PRESETS: dict[str, Preset] = {
             "target_crs": "EPSG:4326",
             "fill_strategy": "interpolate",
         },
-        notes=(
-            "Set target CRS to EPSG:4326; keep interpolation for small voids.",
-        ),
+        notes=("Set target CRS to EPSG:4326; keep interpolation for small voids.",),
         example=(
             "python -m dem2dsf build --dem <eu_dem_utm.tif> --tile +DD+DDD "
             "--target-crs EPSG:4326 --resampling cubic --fill-strategy interpolate"
@@ -76,9 +72,7 @@ _PRESETS: dict[str, Preset] = {
             "resampling": "bilinear",
             "fill_strategy": "fallback",
         },
-        notes=(
-            "Add one or more fallback DEMs to fill voids reliably.",
-        ),
+        notes=("Add one or more fallback DEMs to fill voids reliably.",),
         example=(
             "python -m dem2dsf build --dem <srtm.tif> --fallback-dem <alos.tif> "
             "--tile +DD+DDD --fill-strategy fallback"
@@ -95,13 +89,8 @@ _PRESETS: dict[str, Preset] = {
             "resampling": "bilinear",
             "fill_strategy": "none",
         },
-        notes=(
-            "Use a DEM stack JSON to blend LiDAR over base coverage.",
-        ),
-        example=(
-            "python -m dem2dsf build --dem-stack stack.json --tile +DD+DDD "
-            "--density high"
-        ),
+        notes=("Use a DEM stack JSON to blend LiDAR over base coverage.",),
+        example=("python -m dem2dsf build --dem-stack stack.json --tile +DD+DDD --density high"),
     ),
 }
 
@@ -142,13 +131,17 @@ def _preset_from_mapping(data: Mapping[str, Any]) -> Preset | None:
         return None
     inputs = _coerce_str_list(data.get("inputs"))
     notes = _coerce_str_list(data.get("notes"))
-    options = data.get("options") if isinstance(data.get("options"), Mapping) else {}
-    example = data.get("example") if isinstance(data.get("example"), str) else ""
+    raw_options = data.get("options")
+    options: dict[str, Any] = {}
+    if isinstance(raw_options, Mapping):
+        options = {str(key): value for key, value in raw_options.items()}
+    example_value = data.get("example")
+    example = example_value if isinstance(example_value, str) else ""
     return Preset(
         name=name.strip().lower(),
         summary=summary.strip(),
         inputs=inputs,
-        options=dict(options),
+        options=options,
         notes=notes,
         example=example,
     )
@@ -194,8 +187,7 @@ def serialize_presets(presets: Mapping[str, Preset]) -> dict[str, Any]:
     return {
         "version": PRESET_FORMAT_VERSION,
         "presets": [
-            preset_as_dict(preset)
-            for preset in sorted(presets.values(), key=lambda p: p.name)
+            preset_as_dict(preset) for preset in sorted(presets.values(), key=lambda p: p.name)
         ],
     }
 
@@ -207,9 +199,7 @@ def write_user_presets(path: Path, presets: Mapping[str, Preset]) -> None:
     path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
 
-def list_presets(
-    *, include_user: bool = True, user_path: Path | None = None
-) -> tuple[Preset, ...]:
+def list_presets(*, include_user: bool = True, user_path: Path | None = None) -> tuple[Preset, ...]:
     """Return all presets in sorted order."""
     merged = dict(_PRESETS)
     if include_user:

@@ -1,6 +1,11 @@
 from __future__ import annotations
 
+import os
+import platform
 import shutil
+import stat
+import struct
+import sys
 import tarfile
 import zipfile
 from pathlib import Path
@@ -10,19 +15,45 @@ import pytest
 from dem2dsf.tools import installer
 
 
-def _make_zip(path: Path, member: str, content: str = "data") -> Path:
+def _make_zip(path: Path, member: str, content: bytes | str = "data") -> Path:
     with zipfile.ZipFile(path, "w") as archive:
         archive.writestr(member, content)
     return path
 
 
-def _make_tar(path: Path, member: str, content: str = "data") -> Path:
+def _make_tar(path: Path, member: str, content: bytes | str = "data") -> Path:
     member_path = path.parent / member
     member_path.parent.mkdir(parents=True, exist_ok=True)
-    member_path.write_text(content, encoding="utf-8")
+    if isinstance(content, bytes):
+        member_path.write_bytes(content)
+    else:
+        member_path.write_text(content, encoding="utf-8")
     with tarfile.open(path, "w") as archive:
         archive.add(member_path, arcname=member)
     return path
+
+
+def _exe_name(base: str) -> str:
+    return f"{base}.exe" if os.name == "nt" else base
+
+
+def _exe_payload() -> bytes:
+    if sys.platform == "darwin":
+        machine = platform.machine().lower()
+        if machine in {"arm64", "aarch64"}:
+            cputype = 0x0100000C
+        else:
+            cputype = 0x01000007
+        return b"\xcf\xfa\xed\xfe" + struct.pack("<I", cputype) + b"\x00" * 24
+    return b"\x7fELF\x02\x01\x01"
+
+
+def _write_executable(path: Path) -> None:
+    if os.name == "nt":
+        path.write_text("stub", encoding="utf-8")
+        return
+    path.write_bytes(_exe_payload())
+    path.chmod(path.stat().st_mode | stat.S_IXUSR)
 
 
 def test_is_url() -> None:
@@ -75,9 +106,7 @@ def test_extract_archive_tar(tmp_path: Path) -> None:
     assert (destination / "root") in roots
 
 
-def test_extract_archive_tar_empty_member(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_extract_archive_tar_empty_member(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     archive = tmp_path / "empty.tar"
     archive.write_text("stub", encoding="utf-8")
 
@@ -127,28 +156,28 @@ def test_safe_extract_path_rejects_prefix_bypass(tmp_path: Path) -> None:
 def test_find_executable_in_search_dirs(tmp_path: Path) -> None:
     tool_dir = tmp_path / "tool"
     tool_dir.mkdir()
-    tool_path = tool_dir / "DSFTool.exe"
-    tool_path.write_text("stub", encoding="utf-8")
+    tool_path = tool_dir / _exe_name("DSFTool")
+    _write_executable(tool_path)
 
-    found = installer._find_executable(["DSFTool.exe"], [tool_dir])
+    found = installer._find_executable([tool_path.name], [tool_dir])
     assert found == tool_path
 
 
 def test_find_in_tree(tmp_path: Path) -> None:
-    nested = tmp_path / "nest" / "DSFTool.exe"
+    nested = tmp_path / "nest" / _exe_name("DSFTool")
     nested.parent.mkdir(parents=True)
-    nested.write_text("stub", encoding="utf-8")
+    _write_executable(nested)
 
-    found = installer._find_in_tree(tmp_path, ["DSFTool.exe"])
+    found = installer._find_in_tree(tmp_path, [nested.name])
     assert found == nested
 
 
 def test_find_executable_with_which(monkeypatch, tmp_path: Path) -> None:
-    tool_path = tmp_path / "dsf"
-    tool_path.write_text("stub", encoding="utf-8")
+    tool_path = tmp_path / _exe_name("dsf")
+    _write_executable(tool_path)
 
     monkeypatch.setattr(installer.shutil, "which", lambda name: str(tool_path))
-    found = installer._find_executable(["DSFTool.exe"], [])
+    found = installer._find_executable([tool_path.name], [])
     assert found == tool_path
 
 
@@ -160,36 +189,63 @@ def test_find_executable_missing(monkeypatch) -> None:
 def test_find_dsftool_in_dir(tmp_path: Path) -> None:
     tool_dir = tmp_path / "tools"
     tool_dir.mkdir()
-    tool_path = tool_dir / "DSFTool.exe"
-    tool_path.write_text("stub", encoding="utf-8")
+    tool_path = tool_dir / _exe_name("DSFTool")
+    _write_executable(tool_path)
 
     assert installer.find_dsftool([tool_dir]) == tool_path
 
 
+def test_find_ddstool_in_tree(tmp_path: Path) -> None:
+    tool_dir = tmp_path / "tools" / "nested"
+    tool_dir.mkdir(parents=True)
+    tool_path = tool_dir / _exe_name("DDSTool")
+    _write_executable(tool_path)
+
+    assert installer.find_ddstool([tmp_path]) == tool_path
+
+
 def test_install_from_archive_finds_executable(tmp_path: Path) -> None:
-    archive = _make_zip(tmp_path / "tool.zip", "pkg/DSFTool.exe")
+    exe_name = _exe_name("DSFTool")
+    archive = _make_zip(tmp_path / "tool.zip", f"pkg/{exe_name}", content=_exe_payload())
     destination = tmp_path / "install"
 
     result = installer.install_from_archive(
         archive,
         destination,
-        executable_names=("DSFTool.exe",),
+        executable_names=(exe_name,),
     )
 
-    assert result.name == "DSFTool.exe"
+    assert result.name == exe_name
+
+
+def test_install_from_archive_sets_executable(tmp_path: Path) -> None:
+    if os.name == "nt":
+        pytest.skip("POSIX execute bit check not applicable on Windows.")
+    exe_name = _exe_name("DSFTool")
+    archive = _make_zip(tmp_path / "tool.zip", f"pkg/{exe_name}", content=_exe_payload())
+    destination = tmp_path / "install"
+
+    result = installer.install_from_archive(
+        archive,
+        destination,
+        executable_names=(exe_name,),
+    )
+
+    assert result.stat().st_mode & stat.S_IXUSR
 
 
 def test_install_from_url_file(tmp_path: Path) -> None:
-    archive = _make_zip(tmp_path / "tool.zip", "pkg/DSFTool.exe")
+    exe_name = _exe_name("DSFTool")
+    archive = _make_zip(tmp_path / "tool.zip", f"pkg/{exe_name}", content=_exe_payload())
     destination = tmp_path / "download"
 
     result = installer.install_from_url(
         archive.as_uri(),
         destination,
-        executable_names=("DSFTool.exe",),
+        executable_names=(exe_name,),
     )
 
-    assert result.name == "DSFTool.exe"
+    assert result.name == exe_name
 
 
 def test_find_ortho4xp_in_dir(tmp_path: Path) -> None:
@@ -206,7 +262,7 @@ def test_find_ortho4xp_missing(tmp_path: Path) -> None:
     assert found is None
 
 
-def test_install_ortho4xp_requires_git(tmp_path: Path, monkeypatch) -> None:    
+def test_install_ortho4xp_requires_git(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setattr(installer.shutil, "which", lambda *_: None)
     with pytest.raises(RuntimeError, match="git is required"):
         installer.install_ortho4xp("https://example.com/repo.git", tmp_path / "ortho")
@@ -237,7 +293,7 @@ def test_install_ortho4xp_git_clone(monkeypatch, tmp_path: Path) -> None:
 
 
 def test_install_ortho4xp_from_archive(tmp_path: Path) -> None:
-    archive = _make_zip(tmp_path / "ortho.zip", "Ortho4XP/Ortho4XP_v140.py")    
+    archive = _make_zip(tmp_path / "ortho.zip", "Ortho4XP/Ortho4XP_v140.py")
     destination = tmp_path / "ortho"
 
     script = installer.install_ortho4xp(archive.as_uri(), destination)

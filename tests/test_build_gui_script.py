@@ -7,8 +7,9 @@ from pathlib import Path
 def _load_script(name: str):
     module_path = Path(__file__).resolve().parents[1] / "scripts" / name
     spec = importlib.util.spec_from_file_location(name.replace(".py", ""), module_path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"Unable to load script: {module_path}")
     module = importlib.util.module_from_spec(spec)
-    assert spec and spec.loader
     spec.loader.exec_module(module)
     return module
 
@@ -101,9 +102,7 @@ def test_build_gui_icon_unsupported(monkeypatch, tmp_path: Path, capsys) -> None
     monkeypatch.setattr(module, "_has_pyinstaller", lambda: True)
     monkeypatch.setattr(module, "_supports_png_icon", lambda: False)
     monkeypatch.setattr(module.sys, "platform", "win32", raising=False)
-    result = module.main(
-        ["--entry", str(entry), "--dry-run", "--icon", str(icon_path)]
-    )
+    result = module.main(["--entry", str(entry), "--dry-run", "--icon", str(icon_path)])
     assert result == 0
     output = capsys.readouterr().out
     assert "Icon format not supported" in output

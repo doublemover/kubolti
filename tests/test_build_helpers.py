@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
+from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
@@ -19,7 +22,7 @@ class DummyBackend:
         self._spec = BackendSpec(
             name="dummy",
             version="0",
-            artifact_schema_version="1.1",
+            artifact_schema_version="1.2",
             tile_dem_crs="EPSG:4326",
             supports_xp12_rasters=True,
             supports_autoortho=True,
@@ -40,9 +43,26 @@ def test_normalize_command_variants() -> None:
         build._normalize_command(123)
 
 
-def test_resolve_tool_path() -> None:
-    assert build._resolve_tool_path(None) is None
-    assert build._resolve_tool_path(["/tmp/tool"]) == Path("/tmp/tool")
+def test_resolve_tool_command() -> None:
+    assert build._resolve_tool_command(None) is None
+    assert build._resolve_tool_command(["/tmp/tool"]) == ["/tmp/tool"]
+
+
+def test_validate_build_inputs_allows_tile_dem_paths(tmp_path: Path) -> None:
+    tile = "+47+008"
+    tile_path = tmp_path / "tile.tif"
+    tile_path.write_text("dem", encoding="utf-8")
+
+    build._validate_build_inputs(
+        tiles=[tile],
+        dem_paths=[tmp_path / "a.tif", tmp_path / "b.tif"],
+        options={
+            "normalize": False,
+            "tile_dem_paths": {tile: str(tile_path)},
+            "dem_stack_path": str(tmp_path / "stack.json"),
+            "dry_run": True,
+        },
+    )
 
 
 def test_message_and_metric_helpers() -> None:
@@ -89,6 +109,15 @@ def test_resolution_from_options_handles_polar(monkeypatch) -> None:
     assert res == (30.0 / 111_320.0, 30.0 / 111_320.0)
 
 
+def test_normalize_compression() -> None:
+    assert build._normalize_compression(None) is None
+    assert build._normalize_compression("none") is None
+    assert build._normalize_compression("lzw") == "LZW"
+    assert build._normalize_compression("DEFLATE") == "DEFLATE"
+    with pytest.raises(ValueError, match="normalized_compression"):
+        build._normalize_compression("zip")
+
+
 def test_apply_coverage_metrics() -> None:
     report = {"tiles": [{"tile": "+47+008"}, {"tile": "+49+008"}, {"status": "ok"}]}
     metrics = CoverageMetrics(
@@ -102,7 +131,12 @@ def test_apply_coverage_metrics() -> None:
     )
     build._apply_coverage_metrics(report, {"+47+008": metrics})
 
-    assert report["tiles"][0]["metrics"]["coverage"]["coverage_after"] == 0.9
+    tile_metrics = report["tiles"][0].get("metrics")
+    assert isinstance(tile_metrics, dict)
+    coverage = tile_metrics.get("coverage")
+    assert isinstance(coverage, dict)
+    assert coverage["coverage_after"] == 0.9
+
 
 def test_triangle_guardrails(monkeypatch, tmp_path: Path) -> None:
     class DummyEstimate:
@@ -326,7 +360,11 @@ def test_apply_xp12_enrichment_enriched(monkeypatch, tmp_path: Path) -> None:
         output_dir,
     )
 
-    assert report["tiles"][0]["metrics"]["xp12_enrichment"]["status"] == "enriched"
+    tile_metrics = report["tiles"][0].get("metrics")
+    assert isinstance(tile_metrics, dict)
+    enrichment = tile_metrics.get("xp12_enrichment")
+    assert isinstance(enrichment, dict)
+    assert enrichment["status"] == "enriched"
 
 
 def test_apply_xp12_enrichment_postcheck_warning(monkeypatch, tmp_path: Path) -> None:
@@ -374,6 +412,54 @@ def test_apply_autoortho_checks(monkeypatch) -> None:
     assert report["warnings"]
 
 
+def test_apply_dds_validation_header(tmp_path: Path) -> None:
+    textures_dir = tmp_path / "textures"
+    textures_dir.mkdir(parents=True, exist_ok=True)
+    good = textures_dir / "good.dds"
+    bad = textures_dir / "bad.dds"
+    good.write_bytes(b"DDS " + b"\x00" * 16)
+    bad.write_bytes(b"BAD " + b"\x00" * 16)
+
+    report: dict[str, Any] = {"tiles": [{"tile": "+47+008", "status": "ok"}]}
+    build._apply_dds_validation(report, {"dds_validation": "header"}, tmp_path)
+
+    artifacts = report["artifacts"]["dds_validation"]
+    assert str(bad) in artifacts["invalid_headers"]
+    assert report["warnings"]
+
+
+def test_apply_dds_validation_missing_ddstool_strict(tmp_path: Path) -> None:
+    report = {"tiles": [{"tile": "+47+008", "status": "ok"}]}
+    build._apply_dds_validation(
+        report,
+        {"dds_validation": "ddstool", "dds_strict": True},
+        tmp_path,
+    )
+    assert report["errors"]
+    assert report["tiles"][0]["status"] == "error"
+
+
+def test_apply_dds_validation_ddstool_failure(monkeypatch, tmp_path: Path) -> None:
+    textures_dir = tmp_path / "textures"
+    textures_dir.mkdir(parents=True, exist_ok=True)
+    good = textures_dir / "good.dds"
+    good.write_bytes(b"DDS " + b"\x00" * 16)
+
+    monkeypatch.setattr(
+        build, "ddstool_info", lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("boom"))
+    )
+
+    report: dict[str, Any] = {"tiles": [{"tile": "+47+008", "status": "ok"}]}
+    build._apply_dds_validation(
+        report,
+        {"dds_validation": "ddstool", "ddstool": ["tool"]},
+        tmp_path,
+    )
+    artifacts = report["artifacts"]["dds_validation"]
+    assert artifacts["ddstool_failures"]
+    assert report["warnings"]
+
+
 def test_apply_dsf_validation_missing_dsftool() -> None:
     report = {"tiles": [{"tile": "+47+008", "status": "ok"}]}
     build._apply_dsf_validation(report, {}, Path("out"))
@@ -386,6 +472,37 @@ def test_apply_dsf_validation_missing_dsf(tmp_path: Path) -> None:
     build._apply_dsf_validation(report, {"dsftool": ["tool"]}, tmp_path)
 
     assert report["tiles"][0]["status"] == "warning"
+
+
+def test_apply_dsf_validation_preserves_dsftool_command(monkeypatch, tmp_path: Path) -> None:
+    output_dir = tmp_path / "out"
+    dsf_path = xplane_dsf_path(output_dir, "+47+008")
+    dsf_path.parent.mkdir(parents=True, exist_ok=True)
+    dsf_path.write_text("dsf", encoding="utf-8")
+
+    captured = {}
+
+    def fake_roundtrip(tool_cmd, *_args, **_kwargs):
+        captured["cmd"] = tool_cmd
+
+    monkeypatch.setattr(build, "roundtrip_dsf", fake_roundtrip)
+    monkeypatch.setattr(
+        build,
+        "parse_properties_from_file",
+        lambda *_: {
+            "sim/west": "8",
+            "sim/south": "47",
+            "sim/east": "9",
+            "sim/north": "48",
+        },
+    )
+    monkeypatch.setattr(build, "parse_bounds", lambda *_: build.expected_bounds_for_tile("+47+008"))
+    monkeypatch.setattr(build, "compare_bounds", lambda *_: [])
+
+    report = {"tiles": [{"tile": "+47+008", "status": "ok"}]}
+    build._apply_dsf_validation(report, {"dsftool": ["wine", "DSFTool.exe"]}, output_dir)
+
+    assert captured["cmd"] == ["wine", "DSFTool.exe"]
 
 
 def test_apply_dsf_validation_roundtrip_error(monkeypatch, tmp_path: Path) -> None:
@@ -412,6 +529,7 @@ def test_apply_dsf_validation_parse_error(monkeypatch, tmp_path: Path) -> None:
     dsf_path.write_text("dsf", encoding="utf-8")
 
     monkeypatch.setattr(build, "roundtrip_dsf", lambda *_: None)
+
     def raise_properties(*_args):
         raise ValueError("bad")
 
@@ -438,6 +556,7 @@ def test_apply_dsf_validation_mismatch(monkeypatch, tmp_path: Path) -> None:
     build._apply_dsf_validation(report, {"dsftool": ["tool"]}, output_dir)
 
     assert report["errors"]
+
 
 def test_run_build_with_stack(monkeypatch, tmp_path: Path) -> None:
     output_dir = tmp_path / "out"
@@ -483,6 +602,134 @@ def test_run_build_with_stack(monkeypatch, tmp_path: Path) -> None:
     assert result.build_report["tiles"] == []
 
 
+def test_run_build_resume_skips_ok_tiles(monkeypatch, tmp_path: Path) -> None:
+    output_dir = tmp_path / "out"
+    output_dir.mkdir()
+    (output_dir / "build_report.json").write_text(
+        json.dumps({"tiles": [{"tile": "+47+008", "status": "ok"}]}),
+        encoding="utf-8",
+    )
+
+    dem_path = tmp_path / "dem.tif"
+    dem_path.write_text("dem", encoding="utf-8")
+    tile_path = tmp_path / "tile.tif"
+    tile_path.write_text("tile", encoding="utf-8")
+    captured: dict[str, list[str]] = {}
+
+    class ResumeBackend:
+        def __init__(self) -> None:
+            self._spec = BackendSpec(
+                name="dummy",
+                version="0",
+                artifact_schema_version="1.1",
+                tile_dem_crs="EPSG:4326",
+                supports_xp12_rasters=False,
+                supports_autoortho=False,
+            )
+
+        def spec(self) -> BackendSpec:
+            return self._spec
+
+        def build(self, request: BuildRequest) -> BuildResult:
+            captured["tiles"] = list(request.tiles)
+            return BuildResult(
+                build_plan={},
+                build_report={"tiles": [], "warnings": [], "errors": []},
+            )
+
+    info = SimpleNamespace(
+        path=dem_path,
+        crs="EPSG:4326",
+        bounds=(0.0, 0.0, 1.0, 1.0),
+        resolution=(1.0, 1.0),
+        nodata=None,
+        vertical_units=None,
+        min_elevation=None,
+        max_elevation=None,
+        nan_ratio=None,
+        nodata_ratio=None,
+    )
+
+    monkeypatch.setattr(build, "get_backend", lambda *_: ResumeBackend())
+    monkeypatch.setattr(build, "inspect_dem", lambda *_args, **_kwargs: info)
+    monkeypatch.setattr(
+        build,
+        "estimate_triangles_from_raster",
+        lambda *_args, **_kwargs: SimpleNamespace(count=0, width=1, height=1),
+    )
+    monkeypatch.setattr(build, "validate_build_plan", lambda *_: None)
+    monkeypatch.setattr(build, "validate_build_report", lambda *_: None)
+
+    result = build.run_build(
+        dem_paths=[dem_path],
+        tiles=["+47+008", "+48+008"],
+        backend_name="dummy",
+        output_dir=output_dir,
+        options={
+            "quality": "compat",
+            "density": "medium",
+            "normalize": False,
+            "tile_dem_paths": {"+47+008": str(tile_path), "+48+008": str(tile_path)},
+            "resume": "build",
+        },
+    )
+
+    assert captured["tiles"] == ["+48+008"]
+    assert any(tile["status"] == "skipped" for tile in result.build_report["tiles"])
+
+
+def test_run_build_resume_validate_only(monkeypatch, tmp_path: Path) -> None:
+    output_dir = tmp_path / "out"
+    output_dir.mkdir()
+    (output_dir / "build_report.json").write_text(
+        json.dumps({"tiles": [{"tile": "+47+008", "status": "ok"}]}),
+        encoding="utf-8",
+    )
+    (output_dir / "build_plan.json").write_text(
+        json.dumps(
+            {
+                "schema_version": "1.1",
+                "backend": {"name": "dummy", "version": "0"},
+                "inputs": {"dems": ["dem.tif"]},
+                "tiles": ["+47+008"],
+                "options": {},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    class ValidateBackend:
+        def __init__(self) -> None:
+            self._spec = BackendSpec(
+                name="dummy",
+                version="0",
+                artifact_schema_version="1.1",
+                tile_dem_crs="EPSG:4326",
+                supports_xp12_rasters=False,
+                supports_autoortho=False,
+            )
+
+        def spec(self) -> BackendSpec:
+            return self._spec
+
+        def build(self, _request: BuildRequest) -> BuildResult:
+            raise AssertionError("backend should not run during resume validate-only")
+
+    monkeypatch.setattr(build, "get_backend", lambda *_: ValidateBackend())
+    monkeypatch.setattr(build, "validate_build_plan", lambda *_: None)
+    monkeypatch.setattr(build, "validate_build_report", lambda *_: None)
+
+    result = build.run_build(
+        dem_paths=[],
+        tiles=[],
+        backend_name="dummy",
+        output_dir=output_dir,
+        options={"quality": "compat", "density": "medium", "resume": "validate-only"},
+    )
+
+    assert result.build_report["artifacts"]["resume_mode"] == "validate-only"
+
+
 def test_run_build_uses_normalization_cache(monkeypatch, tmp_path: Path) -> None:
     output_dir = tmp_path / "out"
     dem_path = tmp_path / "dem.tif"
@@ -505,6 +752,10 @@ def test_run_build_uses_normalization_cache(monkeypatch, tmp_path: Path) -> None
         fill_value=0.0,
         backend_profile=None,
         dem_stack=None,
+        aoi=None,
+        aoi_crs=None,
+        mosaic_strategy="full",
+        normalized_compression=None,
     )
     cache = build.NormalizationCache(
         version=build.CACHE_VERSION,
@@ -513,7 +764,9 @@ def test_run_build_uses_normalization_cache(monkeypatch, tmp_path: Path) -> None
         options=cache_options,
         tiles=(tile,),
         tile_paths={tile: str(tile_path)},
+        tile_fingerprints={tile: build.SourceFingerprint.from_path(tile_path)},
         mosaic_path=str(mosaic_path),
+        mosaic_fingerprint=build.SourceFingerprint.from_path(mosaic_path),
         coverage={
             tile: CoverageMetrics(
                 total_pixels=1,

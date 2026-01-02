@@ -18,7 +18,6 @@ def test_density_unknown() -> None:
         triangle_limits_for_preset("hyper")
 
 
-
 def test_triangle_limits() -> None:
     limits = triangle_limits_for_preset("medium")
     assert limits["warn"] < limits["max"]
@@ -29,4 +28,3 @@ def test_ultra_preset_limits() -> None:
     assert config["mesh_zl"] == 19.0
     limits = triangle_limits_for_preset("ultra")
     assert limits["warn"] < limits["max"]
-

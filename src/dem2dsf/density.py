@@ -19,7 +19,6 @@ DENSITY_TRIANGLE_LIMITS: Dict[str, Dict[str, int]] = {
 }
 
 
-
 def ortho4xp_config_for_preset(preset: str) -> Dict[str, float]:
     """Return Ortho4XP config values for a density preset."""
     if preset not in DENSITY_PRESETS:

@@ -76,6 +76,20 @@ def test_stage_custom_dem(tmp_path: Path) -> None:
     assert dest.read_text(encoding="utf-8") == "dem"
 
 
+def test_stage_custom_dem_removes_stale_suffixes(tmp_path: Path) -> None:
+    dem_tif = tmp_path / "tile.tif"
+    dem_hgt = tmp_path / "tile.hgt"
+    dem_tif.write_text("tif", encoding="utf-8")
+    dem_hgt.write_text("hgt", encoding="utf-8")
+
+    stage_custom_dem(tmp_path, "+47+008", dem_tif)
+    second = stage_custom_dem(tmp_path, "+47+008", dem_hgt)
+
+    candidates = sorted(path.name for path in second.parent.glob("N47E008.*"))
+    assert candidates == [second.name]
+    assert second.read_text(encoding="utf-8") == "hgt"
+
+
 def test_copy_tile_outputs(tmp_path: Path) -> None:
     tile_dir = tmp_path / "zOrtho4XP_+47+008"
     terrain = tile_dir / "terrain"
@@ -118,9 +132,7 @@ def test_update_skip_downloads(tmp_path: Path) -> None:
 def test_read_config_values(tmp_path: Path) -> None:
     config = tmp_path / "Ortho4XP.cfg"
     config.write_text(
-        'custom_overlay_src="C:/X-Plane/Global Scenery"\n'
-        "foo=bar # inline\n"
-        "# comment\n",
+        'custom_overlay_src="C:/X-Plane/Global Scenery"\nfoo=bar # inline\n# comment\n',
         encoding="utf-8",
     )
     values = read_config_values(config)
@@ -130,7 +142,7 @@ def test_read_config_values(tmp_path: Path) -> None:
 
 def test_find_tile_cache_entries(tmp_path: Path) -> None:
     roots = ortho_cache_roots(tmp_path)
-    bucket = (tmp_path / "Elevation_data" / "+40+000")
+    bucket = tmp_path / "Elevation_data" / "+40+000"
     bucket.mkdir(parents=True, exist_ok=True)
     elev = bucket / "N47E008.hgt"
     elev.write_text("dem", encoding="utf-8")
@@ -189,23 +201,37 @@ def test_restore_config_removes_new_file(tmp_path: Path) -> None:
 
 def test_build_command_variants(tmp_path: Path) -> None:
     script = tmp_path / "Ortho4XP_v140.py"
-    script.write_text("pass", encoding="utf-8")
+    script.write_text("--tile --output", encoding="utf-8")
     output_dir = tmp_path / "out"
 
     cmd = build_command(script, "+47+008", output_dir, extra_args=["--foo"], python_exe="py")
     assert cmd[:3] == ["py", str(script), "--foo"]
+    assert "--tile" in cmd
     assert "--output" in cmd
 
     cmd = build_command(script, "+47+008", output_dir, include_output=False)
     assert "--output" not in cmd
+
+    legacy_script = tmp_path / "Ortho4XP.py"
+    legacy_script.write_text("pass", encoding="utf-8")
+    cmd = build_command(
+        legacy_script,
+        "+47+008",
+        output_dir,
+        extra_args=["--batch", "BI", "16"],
+        python_exe="py",
+    )
+    assert cmd[:3] == ["py", str(legacy_script), "47"]
+    assert "8" in cmd
+    assert "--tile" not in cmd
+    assert "--batch" not in cmd
+    assert "BI" in cmd
 
 
 def test_default_scenery_paths() -> None:
     root = Path("XPlane")
     assert default_scenery_root(root).as_posix().endswith("XPlane/Custom Scenery")
     assert tile_scenery_dir(root, "+47+008").as_posix().endswith("XPlane/zOrtho4XP_+47+008")
-
-
 
 
 def test_ortho4xp_version_parsing() -> None:

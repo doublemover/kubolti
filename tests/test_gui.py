@@ -40,17 +40,38 @@ def test_invalid_tiles() -> None:
     assert gui._invalid_tiles(["47+008", "+47+08"]) == ["47+008", "+47+08"]
 
 
+def test_build_warnings_suggests_resolution(monkeypatch, tmp_path: Path) -> None:
+    dem_path = tmp_path / "dem.tif"
+    dem_path.write_text("stub", encoding="utf-8")
+    info = SimpleNamespace(
+        crs="EPSG:4326",
+        resolution=(0.0001, 0.0001),
+        bounds=(0.0, 0.0, 1.0, 1.0),
+    )
+    monkeypatch.setattr(gui, "inspect_dem", lambda *_: info)
+
+    warnings = gui._build_warnings([dem_path], ["+00+000"], {"target_resolution": None})
+
+    assert any("Suggested target resolution" in warning for warning in warnings)
+
+
 def test_gui_prefs_roundtrip(tmp_path: Path, monkeypatch) -> None:
     prefs_path = tmp_path / "prefs.json"
     monkeypatch.setenv(gui.ENV_GUI_PREFS, str(prefs_path))
     payload = {
         "build": {"tiles": "+47+008", "dry_run": True},
-        "publish": {"output_zip": "build.zip", "dsf_7z": True, "dsf_7z_backup": True},
+        "publish": {
+            "output_zip": "build.zip",
+            "mode": "scenery",
+            "dsf_7z": True,
+            "dsf_7z_backup": True,
+        },
     }
     gui.save_gui_prefs(payload)
     loaded = gui.load_gui_prefs()
     assert loaded["build"]["tiles"] == "+47+008"
     assert loaded["build"]["dry_run"] is True
+    assert loaded["publish"]["mode"] == "scenery"
     assert loaded["publish"]["dsf_7z"] is True
     assert loaded["publish"]["dsf_7z_backup"] is True
 
@@ -113,11 +134,15 @@ def test_build_form_to_request() -> None:
     values = {
         "dems": "a.tif, b.tif",
         "dem_stack": "",
+        "aoi_path": "area.geojson",
+        "aoi_crs": "EPSG:4326",
         "tiles": "+47+008",
+        "infer_tiles": True,
         "output_dir": "out",
         "quality": "xp12-enhanced",
         "density": "high",
         "autoortho": True,
+        "autoortho_texture_strict": True,
         "skip_normalize": False,
         "tile_jobs": "4",
         "triangle_warn": "100",
@@ -128,6 +153,12 @@ def test_build_form_to_request() -> None:
         "ortho_python": "",
         "ortho_batch": False,
         "dsftool_path": "dsftool.exe",
+        "ddstool_path": "ddstool.exe",
+        "dsf_validation": "bounds",
+        "dsf_validation_workers": "6",
+        "validate_all": True,
+        "dds_validation": "ddstool",
+        "dds_strict": True,
         "target_crs": "EPSG:4326",
         "resampling": "nearest",
         "target_resolution": "30",
@@ -137,6 +168,7 @@ def test_build_form_to_request() -> None:
         "fallback_dems": "fallback.tif",
         "global_scenery": "Global Scenery",
         "enrich_xp12": True,
+        "xp12_strict": True,
         "profile": True,
         "metrics_json": "metrics.json",
         "dry_run": True,
@@ -150,6 +182,10 @@ def test_build_form_to_request() -> None:
     assert options["quality"] == "xp12-enhanced"
     assert options["density"] == "high"
     assert options["autoortho"] is True
+    assert options["autoortho_texture_strict"] is True
+    assert options["aoi"] == "area.geojson"
+    assert options["aoi_crs"] == "EPSG:4326"
+    assert options["infer_tiles"] is True
     assert options["normalize"] is True
     assert options["tile_jobs"] == 4
     assert options["triangle_warn"] == 100
@@ -157,17 +193,22 @@ def test_build_form_to_request() -> None:
     assert options["allow_triangle_overage"] is True
     assert options["runner"] == ["python", "runner.py", "--demo"]
     assert options["dsftool"] == ["dsftool.exe"]
+    assert options["ddstool"] == ["ddstool.exe"]
+    assert options["dsf_validation"] == "bounds"
+    assert options["dsf_validation_workers"] == 6
+    assert options["validate_all"] is True
+    assert options["dds_validation"] == "ddstool"
+    assert options["dds_strict"] is True
     assert options["global_scenery"] == "Global Scenery"
     assert options["enrich_xp12"] is True
+    assert options["xp12_strict"] is True
     assert options["profile"] is True
     assert options["metrics_json"] == "metrics.json"
 
 
 def test_build_form_to_request_with_ortho_root(monkeypatch) -> None:
     runner_path = Path("runner.py")
-    monkeypatch.setattr(
-        gui, "_default_ortho_runner", lambda: [sys.executable, str(runner_path)]
-    )
+    monkeypatch.setattr(gui, "_default_ortho_runner", lambda: [sys.executable, str(runner_path)])
 
     values = {
         "dems": "a.tif",
@@ -213,12 +254,11 @@ def test_build_form_to_request_uses_tool_defaults(monkeypatch) -> None:
         return {
             "ortho4xp": Path("Ortho4XP_v140.py"),
             "dsftool": Path("DSFTool.exe"),
+            "ddstool": Path("DDSTool.exe"),
         }
 
     monkeypatch.setattr(gui, "load_tool_paths", fake_load_tool_paths)
-    monkeypatch.setattr(
-        gui, "_default_ortho_runner", lambda: [sys.executable, "runner.py"]
-    )
+    monkeypatch.setattr(gui, "_default_ortho_runner", lambda: [sys.executable, "runner.py"])
     monkeypatch.setattr(gui, "ortho_root_from_paths", lambda _paths: Path("C:/Ortho4XP"))
 
     values = {
@@ -257,6 +297,7 @@ def test_build_form_to_request_uses_tool_defaults(monkeypatch) -> None:
     assert "--ortho-root" in options["runner"]
     assert "--python" in options["runner"]
     assert "--batch" in options["runner"]
+    assert options["ddstool"] == ["DDSTool.exe"]
     assert options["dsftool"] == ["DSFTool.exe"]
 
 
@@ -276,6 +317,7 @@ def test_publish_form_to_request() -> None:
     values = {
         "build_dir": "build",
         "output_zip": "out.zip",
+        "mode": "scenery",
         "dsf_7z": True,
         "dsf_7z_backup": True,
         "sevenzip_path": "7z",
@@ -284,6 +326,7 @@ def test_publish_form_to_request() -> None:
     build_dir, output_zip, options = gui.publish_form_to_request(values)
     assert build_dir == Path("build")
     assert output_zip == Path("out.zip")
+    assert options["mode"] == "scenery"
     assert options["dsf_7z"] is True
     assert options["dsf_7z_backup"] is True
 
