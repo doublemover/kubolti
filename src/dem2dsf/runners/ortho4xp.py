@@ -19,6 +19,7 @@ from dem2dsf.tools.ortho4xp import (
     default_scenery_root,
     find_ortho4xp_script,
     ortho4xp_version,
+    parse_config_values,
     patch_config_values,
     probe_python_runtime,
     read_config_values,
@@ -155,6 +156,7 @@ TRIANGLE_FAILURE_PATTERN = re.compile(
     re.IGNORECASE,
 )
 LOGGER = logging.getLogger("dem2dsf.runner")
+SENSITIVE_CONFIG_TOKENS = ("key", "token", "secret", "pass", "auth", "license")
 
 
 def _event_from_line(line: str) -> dict[str, str] | None:
@@ -207,6 +209,47 @@ def _runner_env() -> dict[str, str]:
     return env
 
 
+def _is_sensitive_key(key: str) -> bool:
+    lowered = key.lower()
+    return any(token in lowered for token in SENSITIVE_CONFIG_TOKENS)
+
+
+def _config_diff(original: str | None, config_path: Path) -> dict[str, dict[str, str | None]]:
+    original_values = parse_config_values(original or "")
+    updated_values = read_config_values(config_path)
+    diff: dict[str, dict[str, str | None]] = {}
+    for key, new_value in updated_values.items():
+        old_value = original_values.get(key)
+        if old_value == new_value:
+            continue
+        if _is_sensitive_key(key):
+            diff[key] = {
+                "before": "<redacted>" if old_value is not None else None,
+                "after": "<redacted>",
+            }
+        else:
+            diff[key] = {"before": old_value, "after": new_value}
+    return diff
+
+
+def _write_config_diff(
+    output_dir: Path,
+    tile: str,
+    diff: dict[str, dict[str, str | None]],
+    *,
+    attempt: int = 1,
+) -> None:
+    if not diff:
+        return
+    log_dir = output_dir / "runner_logs"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    suffix = "" if attempt == 1 else f".attempt{attempt}"
+    payload = {"diff": diff}
+    (log_dir / f"ortho4xp_{tile}{suffix}.config.json").write_text(
+        json.dumps(payload, indent=2), encoding="utf-8"
+    )
+
+
 def _run_with_config(
     *,
     config_path: Path,
@@ -214,14 +257,16 @@ def _run_with_config(
     cmd: list[str],
     cwd: Path,
     persist_config: bool,
-) -> subprocess.CompletedProcess[str]:
+) -> tuple[subprocess.CompletedProcess[str], dict[str, dict[str, str | None]] | None]:
     original_config: str | None = None
     patched = False
+    diff: dict[str, dict[str, str | None]] | None = None
     if config_updates:
         original_config = patch_config_values(config_path, config_updates)
         patched = True
+        diff = _config_diff(original_config, config_path)
     try:
-        return subprocess.run(
+        result = subprocess.run(
             cmd,
             cwd=cwd,
             capture_output=True,
@@ -229,6 +274,7 @@ def _run_with_config(
             check=False,
             env=_runner_env(),
         )
+        return result, diff
     finally:
         if patched and not persist_config:
             restore_config(config_path, original_config)
@@ -390,7 +436,7 @@ def main() -> int:
     config_path = ortho_root / "Ortho4XP.cfg"
     attempt = 1
     base_min_angle = _min_angle_from_config(config_path, config_updates)
-    result = _run_with_config(
+    result, config_diff = _run_with_config(
         config_path=config_path,
         config_updates=config_updates,
         cmd=cmd,
@@ -398,6 +444,8 @@ def main() -> int:
         persist_config=args.persist_config,
     )
     _write_logs(output_dir, args.tile, result, attempt=attempt)
+    if config_diff:
+        _write_config_diff(output_dir, args.tile, config_diff, attempt=attempt)
     if result.returncode != 0 and _needs_triangulation_retry(result.stdout, result.stderr):
         for min_angle in _retry_min_angles(base_min_angle):
             attempt += 1
@@ -407,7 +455,7 @@ def main() -> int:
                 extra={**log_extra, "attempt": attempt, "min_angle": min_angle},
             )
             retry_updates = {**config_updates, "min_angle": min_angle}
-            result = _run_with_config(
+            result, config_diff = _run_with_config(
                 config_path=config_path,
                 config_updates=retry_updates,
                 cmd=cmd,
@@ -415,6 +463,8 @@ def main() -> int:
                 persist_config=args.persist_config,
             )
             _write_logs(output_dir, args.tile, result, attempt=attempt)
+            if config_diff:
+                _write_config_diff(output_dir, args.tile, config_diff, attempt=attempt)
             if result.returncode == 0:
                 break
     if result.returncode != 0:

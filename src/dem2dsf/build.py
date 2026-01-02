@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 import math
+import os
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any, Iterable, Mapping
 
@@ -19,6 +21,7 @@ from dem2dsf.dem.cache import (
     load_normalization_cache,
     write_normalization_cache,
 )
+from dem2dsf.dem.info import inspect_dem
 from dem2dsf.dem.models import CoverageMetrics
 from dem2dsf.dem.pipeline import normalize_for_tiles, normalize_stack_for_tiles
 from dem2dsf.dem.stack import load_dem_stack, stack_to_options
@@ -33,7 +36,8 @@ from dem2dsf.dsf import (
 )
 from dem2dsf.perf import PerfTracker, resolve_metrics_path
 from dem2dsf.reporting import build_plan, build_report
-from dem2dsf.tools.dsftool import roundtrip_dsf
+from dem2dsf.tools.ddstool import dds_header_ok, ddstool_info
+from dem2dsf.tools.dsftool import dsf_to_text, roundtrip_dsf
 from dem2dsf.triangles import estimate_triangles_from_raster
 from dem2dsf.xp12 import enrich_dsf_rasters, find_global_dsf, inventory_dsf_rasters
 from dem2dsf.xplane_paths import dsf_path as xplane_dsf_path
@@ -147,6 +151,54 @@ def _ensure_metrics(tile_entry: dict[str, Any]) -> dict[str, Any]:
     return metrics
 
 
+def _ensure_reasons(tile_entry: dict[str, Any]) -> list[dict[str, str]]:
+    """Ensure a tile entry has a mutable reasons list."""
+    reasons = tile_entry.get("reasons")
+    if not isinstance(reasons, list):
+        reasons = []
+        tile_entry["reasons"] = reasons
+    return reasons
+
+
+def _tile_message(tile_entry: Mapping[str, Any], message: str) -> str:
+    tile = tile_entry.get("tile")
+    return f"{tile}: {message}" if tile else message
+
+
+def _record_issue(
+    tile_entry: dict[str, Any],
+    *,
+    code: str,
+    message: str,
+    severity: str,
+    report: dict[str, Any] | None = None,
+    include_report: bool = True,
+) -> None:
+    """Record a warning/error with a reason code on a tile entry."""
+    _ensure_messages(tile_entry).append(message)
+    _ensure_reasons(tile_entry).append({"code": code, "severity": severity})
+    if severity == "error":
+        _mark_error(tile_entry)
+        if report is not None and include_report:
+            report.setdefault("errors", []).append(_tile_message(tile_entry, message))
+    elif severity == "warning":
+        _mark_warning(tile_entry)
+        if report is not None and include_report:
+            report.setdefault("warnings", []).append(_tile_message(tile_entry, message))
+
+
+def _note_reason(
+    tile_entry: dict[str, Any],
+    *,
+    code: str,
+    message: str,
+    severity: str,
+) -> None:
+    """Attach a reason code without affecting report-level warnings/errors."""
+    _ensure_messages(tile_entry).append(message)
+    _ensure_reasons(tile_entry).append({"code": code, "severity": severity})
+
+
 def _mark_warning(tile_entry: dict[str, Any]) -> None:
     """Promote a tile status to warning when appropriate."""
     if tile_entry.get("status") == "ok":
@@ -192,6 +244,147 @@ def _resolution_from_options(
     return (resolution_m, resolution_m)
 
 
+def _validation_worker_limit(requested: int | None) -> int:
+    max_workers = os.cpu_count() or 1
+    if requested is None:
+        return max(1, max_workers // 2)
+    workers = int(requested)
+    if workers < 1:
+        raise ValueError("Validation workers must be >= 1.")
+    return min(workers, max_workers)
+
+
+def _dem_resolution_meters(info: object) -> float | None:
+    crs = getattr(info, "crs", None)
+    if crs is None:
+        return None
+    res_x, res_y = getattr(info, "resolution", (None, None))
+    if res_x is None or res_y is None:
+        return None
+    if str(crs).upper() in {"EPSG:4326", "EPSG:4258"}:
+        bounds = getattr(info, "bounds", None)
+        if bounds:
+            mid_lat = (bounds[1] + bounds[3]) / 2.0
+            meters_per_deg_lat = 111_320.0
+            meters_per_deg_lon = meters_per_deg_lat * math.cos(math.radians(mid_lat))
+            if meters_per_deg_lon <= 0:
+                meters_per_deg_lon = meters_per_deg_lat
+            return max(res_x * meters_per_deg_lon, res_y * meters_per_deg_lat)
+    return max(res_x, res_y)
+
+
+def _dem_sanity_findings(info: object) -> list[tuple[str, str]]:
+    findings: list[tuple[str, str]] = []
+    path = getattr(info, "path", "<dem>")
+    crs = getattr(info, "crs", None)
+    nodata = getattr(info, "nodata", None)
+    vertical_units = getattr(info, "vertical_units", None)
+    min_elevation = getattr(info, "min_elevation", None)
+    max_elevation = getattr(info, "max_elevation", None)
+    nan_ratio = getattr(info, "nan_ratio", None)
+    nodata_ratio = getattr(info, "nodata_ratio", None)
+
+    if crs is None:
+        findings.append(
+            (
+                "dem_missing_crs",
+                f"{path}: missing CRS (assume EPSG:4326 or override).",
+            )
+        )
+    if nodata is None:
+        findings.append(
+            (
+                "dem_missing_nodata",
+                f"{path}: missing nodata (AOI masking and fills rely on it).",
+            )
+        )
+    if vertical_units and str(vertical_units).lower() not in {"m", "meter", "meters"}:
+        findings.append(
+            (
+                "dem_vertical_units_nonmetric",
+                f"{path}: vertical units look non-metric ({vertical_units}).",
+            )
+        )
+    resolution = _dem_resolution_meters(info)
+    if resolution is not None and resolution < 1:
+        findings.append(
+            (
+                "dem_resolution_fine",
+                f"{path}: very fine resolution (~{resolution:.2f}m).",
+            )
+        )
+    if resolution is not None and resolution > 500:
+        findings.append(
+            (
+                "dem_resolution_coarse",
+                f"{path}: very coarse resolution (~{resolution:.1f}m).",
+            )
+        )
+    if min_elevation is not None and max_elevation is not None:
+        if min_elevation < -1000 or max_elevation > 9000:
+            findings.append(
+                (
+                    "dem_elevation_range_suspect",
+                    (
+                        f"{path}: elevation range "
+                        f"{min_elevation:.1f}..{max_elevation:.1f} looks suspect."
+                    ),
+                )
+            )
+    if nan_ratio is not None and nan_ratio > 0.01:
+        findings.append(
+            (
+                "dem_nan_ratio_high",
+                f"{path}: {nan_ratio:.1%} NaN samples detected.",
+            )
+        )
+    if nodata_ratio is not None and nodata_ratio > 0.2:
+        findings.append(
+            (
+                "dem_nodata_ratio_high",
+                f"{path}: {nodata_ratio:.1%} nodata coverage in sample.",
+            )
+        )
+    return findings
+
+
+def _apply_dem_sanity_checks(
+    report: dict[str, Any],
+    dem_paths: Iterable[Path],
+) -> None:
+    findings: list[dict[str, str]] = []
+    for path in dem_paths:
+        try:
+            info = inspect_dem(path, sample=True)
+        except Exception as exc:  # pragma: no cover - defensive guard
+            findings.append(
+                {
+                    "path": str(path),
+                    "code": "dem_inspect_failed",
+                    "message": f"{path}: DEM inspection failed ({exc})",
+                }
+            )
+            continue
+        for code, message in _dem_sanity_findings(info):
+            findings.append({"path": str(path), "code": code, "message": message})
+
+    if not findings:
+        return
+    report.setdefault("artifacts", {})["dem_sanity"] = findings
+    for item in findings:
+        report.setdefault("warnings", []).append(item["message"])
+    for tile_entry in report.get("tiles", []):
+        for item in findings:
+            _record_issue(
+                tile_entry,
+                code=item["code"],
+                message=item["message"],
+                severity="warning",
+                report=report,
+                include_report=False,
+            )
+
+
 def _apply_coverage_metrics(report: dict[str, Any], coverage_metrics: Mapping[str, Any]) -> None:
     """Attach coverage metrics to the per-tile report entries."""
     if not coverage_metrics:
@@ -235,14 +428,14 @@ def _apply_coverage_thresholds(
             continue
         if metrics.coverage_before >= min_coverage:
             continue
-        message = f"{tile}: coverage_before {metrics.coverage_before:.2%} below {min_coverage:.2%}"
-        _ensure_messages(tile_entry).append(message)
-        if hard_fail:
-            _mark_error(tile_entry)
-            report.setdefault("errors", []).append(message)
-        else:
-            _mark_warning(tile_entry)
-            report.setdefault("warnings", []).append(message)
+        message = f"coverage_before {metrics.coverage_before:.2%} below {min_coverage:.2%}"
+        _record_issue(
+            tile_entry,
+            code="coverage_below_min",
+            message=message,
+            severity="error" if hard_fail else "warning",
+            report=report,
+        )
 
 
 def _validate_build_inputs(
@@ -317,15 +510,23 @@ def _apply_triangle_guardrails(report: dict[str, Any], options: Mapping[str, Any
         _ensure_messages(tile_entry).append(
             f"Triangle estimate: {estimate.count} (warn {warn_limit}, max {max_limit})"
         )
-        if estimate.count > max_limit and not allow_overage:
-            _mark_error(tile_entry)
-            report.setdefault("errors", []).append(
-                f"{tile}: triangle estimate {estimate.count} exceeds max {max_limit}"
+        if estimate.count > max_limit:
+            message = f"Triangle estimate {estimate.count} exceeds max {max_limit}"
+            _record_issue(
+                tile_entry,
+                code="triangle_over_max",
+                message=message,
+                severity="warning" if allow_overage else "error",
+                report=report,
             )
         elif estimate.count > warn_limit:
-            _mark_warning(tile_entry)
-            report.setdefault("warnings", []).append(
-                f"{tile}: triangle estimate {estimate.count} exceeds warn {warn_limit}"
+            message = f"Triangle estimate {estimate.count} exceeds warn {warn_limit}"
+            _record_issue(
+                tile_entry,
+                code="triangle_over_warn",
+                message=message,
+                severity="warning",
+                report=report,
             )
 
 
@@ -336,6 +537,7 @@ def _apply_xp12_checks(
 ) -> None:
     """Inventory XP12 rasters in DSFs and record warnings/errors."""
     quality = options.get("quality", "compat")
+    strict_required = bool(options.get("xp12_strict", False)) or quality == "xp12-enhanced"
     dsftool_cmd = _resolve_tool_command(options.get("dsftool"))
     global_scenery = options.get("global_scenery")
     global_root = Path(global_scenery) if global_scenery else None
@@ -347,18 +549,23 @@ def _apply_xp12_checks(
             continue
         dsf_path = xplane_dsf_path(output_dir, tile)
         if not dsf_path.exists():
-            _ensure_messages(tile_entry).append("DSF output not found; XP12 raster check skipped.")
-            _mark_warning(tile_entry)
+            _record_issue(
+                tile_entry,
+                code="xp12_dsf_missing",
+                message="DSF output not found; XP12 raster check skipped.",
+                severity="error" if strict_required else "warning",
+                report=report,
+            )
             continue
         if not dsftool_cmd:
             message = "DSFTool not configured; XP12 raster check skipped."
-            _ensure_messages(tile_entry).append(message)
-            if quality == "xp12-enhanced":
-                _mark_error(tile_entry)
-                report.setdefault("errors", []).append(f"{tile}: {message}")
-            else:
-                _mark_warning(tile_entry)
-                report.setdefault("warnings", []).append(f"{tile}: {message}")
+            _record_issue(
+                tile_entry,
+                code="xp12_dsftool_missing",
+                message=message,
+                severity="error" if strict_required else "warning",
+                report=report,
+            )
             continue
 
         try:
@@ -369,9 +576,13 @@ def _apply_xp12_checks(
                 **dsftool_kwargs,
             )
         except RuntimeError as exc:
-            _ensure_messages(tile_entry).append(str(exc))
-            _mark_error(tile_entry)
-            report.setdefault("errors", []).append(f"{tile}: {exc}")
+            _record_issue(
+                tile_entry,
+                code="xp12_inventory_failed",
+                message=str(exc),
+                severity="error",
+                report=report,
+            )
             continue
 
         metrics = _ensure_metrics(tile_entry)
@@ -389,13 +600,14 @@ def _apply_xp12_checks(
             missing.append("seasons")
         if missing:
             message = f"XP12 rasters missing: {', '.join(missing)}"
-            _ensure_messages(tile_entry).append(message)
-            if quality == "xp12-enhanced":
-                _mark_error(tile_entry)
-                report.setdefault("errors", []).append(f"{tile}: {message}")
-            else:
-                _mark_warning(tile_entry)
-                report.setdefault("warnings", []).append(f"{tile}: {message}")
+            metrics["xp12_rasters"]["missing_required"] = missing
+            _record_issue(
+                tile_entry,
+                code="xp12_rasters_missing",
+                message=message,
+                severity="error" if strict_required else "warning",
+                report=report,
+            )
         if global_root:
             candidate = find_global_dsf(global_root, tile)
             if candidate:
@@ -419,8 +631,14 @@ def _apply_xp12_enrichment(
     if not dsftool_cmd or not global_root:
         message = "XP12 enrichment requires --dsftool and --global-scenery."
         for tile_entry in report.get("tiles", []):
-            _ensure_messages(tile_entry).append(message)
-            _mark_error(tile_entry)
+            _record_issue(
+                tile_entry,
+                code="xp12_enrichment_missing_tools",
+                message=message,
+                severity="error",
+                report=report,
+                include_report=False,
+            )
         report.setdefault("errors", []).append(message)
         return
 
@@ -430,16 +648,23 @@ def _apply_xp12_enrichment(
             continue
         dsf_path = xplane_dsf_path(output_dir, tile)
         if not dsf_path.exists():
-            _ensure_messages(tile_entry).append("DSF output not found; XP12 enrichment skipped.")
-            _mark_warning(tile_entry)
+            _record_issue(
+                tile_entry,
+                code="xp12_enrichment_dsf_missing",
+                message="DSF output not found; XP12 enrichment skipped.",
+                severity="warning",
+                report=report,
+            )
             continue
         global_dsf = find_global_dsf(global_root, tile)
         if not global_dsf:
-            _ensure_messages(tile_entry).append(
-                "Global scenery DSF not found; XP12 enrichment skipped."
+            _record_issue(
+                tile_entry,
+                code="xp12_enrichment_global_missing",
+                message="Global scenery DSF not found; XP12 enrichment skipped.",
+                severity="warning",
+                report=report,
             )
-            _mark_warning(tile_entry)
-            report.setdefault("warnings", []).append(f"{tile}: global scenery DSF not found")
             continue
 
         result = enrich_dsf_rasters(
@@ -460,9 +685,13 @@ def _apply_xp12_enrichment(
             "error": result.error,
         }
         if result.status == "failed":
-            _ensure_messages(tile_entry).append(f"XP12 enrichment failed: {result.error}")
-            _mark_error(tile_entry)
-            report.setdefault("errors", []).append(f"{tile}: XP12 enrichment failed")
+            _record_issue(
+                tile_entry,
+                code="xp12_enrichment_failed",
+                message=f"XP12 enrichment failed: {result.error}",
+                severity="error",
+                report=report,
+            )
             continue
         if result.status == "no-op":
             _ensure_messages(tile_entry).append(
@@ -485,9 +714,13 @@ def _apply_xp12_enrichment(
                     "rasters": list(summary.raster_names),
                 }
             except RuntimeError as exc:
-                _ensure_messages(tile_entry).append(str(exc))
-                _mark_warning(tile_entry)
-                report.setdefault("warnings", []).append(f"{tile}: xp12 post-check failed")
+                _record_issue(
+                    tile_entry,
+                    code="xp12_enrichment_postcheck_failed",
+                    message=str(exc),
+                    severity="warning",
+                    report=report,
+                )
 
 
 def _apply_autoortho_checks(
@@ -500,6 +733,7 @@ def _apply_autoortho_checks(
         return
 
     textures = scan_terrain_textures(output_dir)
+    strict = bool(options.get("autoortho_texture_strict", False))
     report.setdefault("artifacts", {})["autoortho"] = {
         "referenced": list(textures.referenced),
         "missing": list(textures.missing),
@@ -514,15 +748,134 @@ def _apply_autoortho_checks(
     for tile_entry in report.get("tiles", []):
         _ensure_messages(tile_entry).append(summary)
         if textures.invalid or textures.missing:
-            _mark_warning(tile_entry)
+            _mark_error(tile_entry) if strict else _mark_warning(tile_entry)
+
+    severity = "error" if strict else "warning"
     if textures.invalid:
-        report.setdefault("warnings", []).append(
-            f"AutoOrtho invalid texture refs: {', '.join(textures.invalid[:5])}"
-        )
+        message = f"AutoOrtho invalid texture refs: {', '.join(textures.invalid[:5])}"
+        report.setdefault("errors" if strict else "warnings", []).append(message)
+        for tile_entry in report.get("tiles", []):
+            _record_issue(
+                tile_entry,
+                code="autoortho_invalid_textures",
+                message=message,
+                severity=severity,
+                report=report,
+                include_report=False,
+            )
     if textures.missing:
-        report.setdefault("warnings", []).append(
-            f"AutoOrtho missing texture refs: {', '.join(textures.missing[:5])}"
-        )
+        message = f"AutoOrtho missing texture refs: {', '.join(textures.missing[:5])}"
+        report.setdefault("errors" if strict else "warnings", []).append(message)
+        for tile_entry in report.get("tiles", []):
+            _record_issue(
+                tile_entry,
+                code="autoortho_missing_textures",
+                message=message,
+                severity=severity,
+                report=report,
+                include_report=False,
+            )
+
+
+def _collect_dds_paths(output_dir: Path) -> list[Path]:
+    textures_dir = output_dir / "textures"
+    if not textures_dir.exists():
+        return []
+    return sorted(
+        path for path in textures_dir.rglob("*") if path.is_file() and path.suffix.lower() == ".dds"
+    )
+
+
+def _apply_dds_validation(
+    report: dict[str, Any],
+    options: Mapping[str, Any],
+    output_dir: Path,
+) -> None:
+    mode = options.get("dds_validation", "none")
+    if mode == "none":
+        return
+    if mode not in {"header", "ddstool"}:
+        raise ValueError(f"Unsupported DDS validation mode: {mode}")
+    strict = bool(options.get("dds_strict", False))
+    ddstool_cmd = _resolve_tool_command(options.get("ddstool"))
+    if mode == "ddstool" and not ddstool_cmd:
+        message = "DDSTool not configured; DDS validation skipped."
+        for tile_entry in report.get("tiles", []):
+            _record_issue(
+                tile_entry,
+                code="dds_validation_missing_ddstool",
+                message=message,
+                severity="error" if strict else "warning",
+                report=report,
+                include_report=False,
+            )
+        report.setdefault("errors" if strict else "warnings", []).append(message)
+        return
+
+    dds_paths = _collect_dds_paths(output_dir)
+    if not dds_paths:
+        message = "No DDS textures found; DDS validation skipped."
+        for tile_entry in report.get("tiles", []):
+            _record_issue(
+                tile_entry,
+                code="dds_validation_no_textures",
+                message=message,
+                severity="warning",
+                report=report,
+                include_report=False,
+            )
+        report.setdefault("warnings", []).append(message)
+        return
+
+    invalid_headers: list[str] = []
+    ddstool_failures: list[str] = []
+    for texture_path in dds_paths:
+        if not dds_header_ok(texture_path):
+            invalid_headers.append(str(texture_path))
+        if mode == "ddstool" and ddstool_cmd:
+            try:
+                ddstool_info(ddstool_cmd, texture_path)
+            except RuntimeError as exc:
+                ddstool_failures.append(f"{texture_path}: {exc}")
+
+    report.setdefault("artifacts", {})["dds_validation"] = {
+        "mode": mode,
+        "texture_count": len(dds_paths),
+        "invalid_headers": invalid_headers,
+        "ddstool_failures": ddstool_failures,
+    }
+    summary = (
+        f"DDS validation ({mode}): {len(dds_paths)} texture(s), "
+        f"{len(invalid_headers)} invalid headers, {len(ddstool_failures)} ddstool failures."
+    )
+    for tile_entry in report.get("tiles", []):
+        _ensure_messages(tile_entry).append(summary)
+
+    severity = "error" if strict else "warning"
+    if invalid_headers:
+        message = f"DDS header invalid for: {', '.join(invalid_headers[:5])}"
+        report.setdefault("errors" if strict else "warnings", []).append(message)
+        for tile_entry in report.get("tiles", []):
+            _record_issue(
+                tile_entry,
+                code="dds_validation_invalid_header",
+                message=message,
+                severity=severity,
+                report=report,
+                include_report=False,
+            )
+    if ddstool_failures:
+        message = f"DDSTool failed for: {', '.join(ddstool_failures[:3])}"
+        report.setdefault("errors" if strict else "warnings", []).append(message)
+        for tile_entry in report.get("tiles", []):
+            _record_issue(
+                tile_entry,
+                code="dds_validation_ddstool_failed",
+                message=message,
+                severity=severity,
+                report=report,
+                include_report=False,
+            )
 
 
 def _apply_dsf_validation(
@@ -531,73 +884,201 @@ def _apply_dsf_validation(
     output_dir: Path,
 ) -> None:
     """Validate DSF structure and geographic bounds."""
+    mode = options.get("dsf_validation", "roundtrip")
+    if mode == "none":
+        return
+    if mode not in {"bounds", "roundtrip"}:
+        raise ValueError(f"Unsupported DSF validation mode: {mode}")
+    validate_all = bool(options.get("validate_all", False))
     dsftool_cmd = _resolve_tool_command(options.get("dsftool"))
     dsftool_kwargs = _dsftool_kwargs(options)
     if not dsftool_cmd:
         message = "DSFTool not configured; DSF validation skipped."
         for tile_entry in report.get("tiles", []):
-            _ensure_messages(tile_entry).append(message)
-            _mark_warning(tile_entry)
+            _record_issue(
+                tile_entry,
+                code="dsf_validation_missing_dsftool",
+                message=message,
+                severity="warning",
+                report=report,
+                include_report=False,
+            )
         report.setdefault("warnings", []).append(message)
         return
 
-    for tile_entry in report.get("tiles", []):
-        tile = tile_entry.get("tile")
-        if not tile:
+    tile_entries = {
+        tile_entry.get("tile"): tile_entry
+        for tile_entry in report.get("tiles", [])
+        if tile_entry.get("tile")
+    }
+    tasks: list[tuple[str, Path]] = []
+    for tile, tile_entry in tile_entries.items():
+        status = tile_entry.get("status")
+        if not validate_all and status in {"warning", "error", "skipped"}:
+            _note_reason(
+                tile_entry,
+                code="dsf_validation_skipped",
+                message="DSF validation skipped due to tile status.",
+                severity="warning",
+            )
             continue
         dsf_path = xplane_dsf_path(output_dir, tile)
         if not dsf_path.exists():
-            _ensure_messages(tile_entry).append("DSF output not found; DSF validation skipped.")
-            _mark_warning(tile_entry)
+            _record_issue(
+                tile_entry,
+                code="dsf_validation_missing_dsf",
+                message="DSF output not found; DSF validation skipped.",
+                severity="warning",
+                report=report,
+            )
             continue
+        tasks.append((tile, dsf_path))
+
+    if not tasks:
+        return
+
+    def run_validation(tile: str, dsf_path: Path) -> dict[str, Any]:
         work_dir = output_dir / "dsf_validation" / tile
         work_dir.mkdir(parents=True, exist_ok=True)
         text_path = work_dir / f"{dsf_path.stem}.txt"
         rebuilt_path = work_dir / dsf_path.name
-        metrics = _ensure_metrics(tile_entry)
-        metrics["dsf_validation"] = {
-            "roundtrip": "pending",
+        validation_metrics: dict[str, Any] = {
+            "mode": mode,
             "text_path": str(text_path),
-            "rebuilt_path": str(rebuilt_path),
         }
-        try:
-            roundtrip_dsf(
-                dsftool_cmd,
-                dsf_path,
-                work_dir,
-                **dsftool_kwargs,
-            )
-        except RuntimeError as exc:
-            message = str(exc)
-            metrics["dsf_validation"]["roundtrip"] = "failed"
-            metrics["dsf_validation"]["error"] = message
-            _ensure_messages(tile_entry).append(message)
-            _mark_error(tile_entry)
-            report.setdefault("errors", []).append(f"{tile}: {message}")
-            continue
-        metrics["dsf_validation"]["roundtrip"] = "ok"
+        messages: list[str] = []
+        reasons: list[dict[str, str]] = []
+        errors: list[str] = []
+        warnings: list[str] = []
+        status: str | None = None
+
+        def add_issue(severity: str, code: str, message: str) -> None:
+            nonlocal status
+            messages.append(message)
+            reasons.append({"code": code, "severity": severity})
+            if severity == "error":
+                status = "error"
+                errors.append(f"{tile}: {message}")
+            elif severity == "warning":
+                if status != "error":
+                    status = "warning"
+                warnings.append(f"{tile}: {message}")
+
+        if mode == "roundtrip":
+            validation_metrics["roundtrip"] = "pending"
+            validation_metrics["rebuilt_path"] = str(rebuilt_path)
+            try:
+                roundtrip_dsf(
+                    dsftool_cmd,
+                    dsf_path,
+                    work_dir,
+                    **dsftool_kwargs,
+                )
+            except RuntimeError as exc:
+                message = str(exc)
+                validation_metrics["roundtrip"] = "failed"
+                validation_metrics["error"] = message
+                add_issue("error", "dsf_validation_roundtrip_failed", message)
+                return {
+                    "tile": tile,
+                    "messages": messages,
+                    "reasons": reasons,
+                    "metrics": validation_metrics,
+                    "status": status,
+                    "errors": errors,
+                    "warnings": warnings,
+                }
+            validation_metrics["roundtrip"] = "ok"
+        else:
+            validation_metrics["roundtrip"] = "skipped"
+            try:
+                dsf_to_text(
+                    dsftool_cmd,
+                    dsf_path,
+                    text_path,
+                    **dsftool_kwargs,
+                )
+            except RuntimeError as exc:
+                message = str(exc)
+                validation_metrics["roundtrip"] = "failed"
+                validation_metrics["error"] = message
+                add_issue("error", "dsf_validation_dsf2text_failed", message)
+                return {
+                    "tile": tile,
+                    "messages": messages,
+                    "reasons": reasons,
+                    "metrics": validation_metrics,
+                    "status": status,
+                    "errors": errors,
+                    "warnings": warnings,
+                }
+
         try:
             properties = parse_properties_from_file(text_path)
             actual_bounds = parse_bounds(properties)
         except ValueError as exc:
             message = f"DSF bounds parse failed: {exc}"
-            metrics["dsf_validation"]["bounds_error"] = str(exc)
-            _ensure_messages(tile_entry).append(message)
-            _mark_error(tile_entry)
-            report.setdefault("errors", []).append(f"{tile}: {message}")
-            continue
+            validation_metrics["bounds_error"] = str(exc)
+            add_issue("error", "dsf_validation_bounds_parse_failed", message)
+            return {
+                "tile": tile,
+                "messages": messages,
+                "reasons": reasons,
+                "metrics": validation_metrics,
+                "status": status,
+                "errors": errors,
+                "warnings": warnings,
+            }
         expected_bounds = expected_bounds_for_tile(tile)
         mismatches = compare_bounds(expected_bounds, actual_bounds)
-        metrics["dsf_validation"]["bounds"] = {
+        validation_metrics["bounds"] = {
             "expected": expected_bounds.__dict__,
             "actual": actual_bounds.__dict__,
             "mismatches": mismatches,
         }
         if mismatches:
             message = f"DSF bounds mismatch: {', '.join(mismatches)}"
-            _ensure_messages(tile_entry).append(message)
+            add_issue("error", "dsf_validation_bounds_mismatch", message)
+        return {
+            "tile": tile,
+            "messages": messages,
+            "reasons": reasons,
+            "metrics": validation_metrics,
+            "status": status,
+            "errors": errors,
+            "warnings": warnings,
+        }
+
+    def apply_outcome(outcome: dict[str, Any]) -> None:
+        tile = outcome["tile"]
+        tile_entry = tile_entries.get(tile)
+        if not tile_entry:
+            return
+        _ensure_messages(tile_entry).extend(outcome["messages"])
+        _ensure_reasons(tile_entry).extend(outcome["reasons"])
+        metrics = _ensure_metrics(tile_entry)
+        metrics["dsf_validation"] = outcome["metrics"]
+        status = outcome["status"]
+        if status == "error":
             _mark_error(tile_entry)
-            report.setdefault("errors", []).append(f"{tile}: {message}")
+        elif status == "warning":
+            _mark_warning(tile_entry)
+        if outcome["errors"]:
+            report.setdefault("errors", []).extend(outcome["errors"])
+        if outcome["warnings"]:
+            report.setdefault("warnings", []).extend(outcome["warnings"])
+
+    worker_limit = _validation_worker_limit(options.get("dsf_validation_workers"))
+    if worker_limit <= 1 or len(tasks) == 1:
+        for tile, dsf_path in tasks:
+            apply_outcome(run_validation(tile, dsf_path))
+    else:
+        with ThreadPoolExecutor(max_workers=worker_limit) as executor:
+            futures = {
+                executor.submit(run_validation, tile, dsf_path): tile for tile, dsf_path in tasks
+            }
+            for future in as_completed(futures):
+                apply_outcome(future.result())
 
 
 def _attach_performance(
@@ -830,6 +1311,8 @@ def run_build(
                     "warnings": list(result.build_report.get("warnings", [])),
                     "errors": list(result.build_report.get("errors", [])),
                 }
+                with perf.span("dem_sanity"):
+                    _apply_dem_sanity_checks(report, dem_paths)
                 with perf.span("triangle_guardrails"):
                     _apply_triangle_guardrails(report, options)
                 if backend_spec.supports_xp12_rasters:
@@ -839,6 +1322,8 @@ def run_build(
                         _apply_xp12_enrichment(report, options, output_dir)
                 with perf.span("autoortho_checks"):
                     _apply_autoortho_checks(report, options, output_dir)
+                with perf.span("dds_validation"):
+                    _apply_dds_validation(report, options, output_dir)
                 with perf.span("dsf_validation"):
                     _apply_dsf_validation(report, options, output_dir)
                 with perf.span("coverage_metrics"):

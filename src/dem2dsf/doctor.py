@@ -226,6 +226,7 @@ def run_doctor(
     *,
     ortho_runner: list[str] | None,
     dsftool_path: list[str] | None,
+    ddstool_path: list[str] | None = None,
 ) -> list[CheckResult]:
     """Run all environment checks and return the aggregated results."""
     tool_paths = load_tool_paths()
@@ -235,4 +236,5 @@ def run_doctor(
     results.append(check_overlay_source(ortho_runner, tool_paths))
     results.append(check_command("ortho4xp_runner", ortho_runner))
     results.append(check_command("dsftool", dsftool_path))
+    results.append(check_command("ddstool", ddstool_path))
     return results

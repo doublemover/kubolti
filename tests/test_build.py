@@ -317,6 +317,7 @@ def test_run_build_dsf_validation(tmp_path) -> None:
             "density": "medium",
             "runner": [sys.executable, str(runner)],
             "dsftool": [str(dsftool)],
+            "validate_all": True,
         },
     )
 

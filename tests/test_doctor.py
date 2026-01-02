@@ -24,6 +24,7 @@ def test_doctor_defaults() -> None:
     assert "overlay_source" in names
     assert "ortho4xp_runner" in names
     assert "dsftool" in names
+    assert "ddstool" in names
 
 
 def test_check_ortho4xp_version_ok(tmp_path: Path) -> None:

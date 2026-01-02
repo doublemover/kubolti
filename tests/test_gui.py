@@ -121,6 +121,7 @@ def test_build_form_to_request() -> None:
         "quality": "xp12-enhanced",
         "density": "high",
         "autoortho": True,
+        "autoortho_texture_strict": True,
         "skip_normalize": False,
         "tile_jobs": "4",
         "triangle_warn": "100",
@@ -131,6 +132,12 @@ def test_build_form_to_request() -> None:
         "ortho_python": "",
         "ortho_batch": False,
         "dsftool_path": "dsftool.exe",
+        "ddstool_path": "ddstool.exe",
+        "dsf_validation": "bounds",
+        "dsf_validation_workers": "6",
+        "validate_all": True,
+        "dds_validation": "ddstool",
+        "dds_strict": True,
         "target_crs": "EPSG:4326",
         "resampling": "nearest",
         "target_resolution": "30",
@@ -140,6 +147,7 @@ def test_build_form_to_request() -> None:
         "fallback_dems": "fallback.tif",
         "global_scenery": "Global Scenery",
         "enrich_xp12": True,
+        "xp12_strict": True,
         "profile": True,
         "metrics_json": "metrics.json",
         "dry_run": True,
@@ -153,6 +161,7 @@ def test_build_form_to_request() -> None:
     assert options["quality"] == "xp12-enhanced"
     assert options["density"] == "high"
     assert options["autoortho"] is True
+    assert options["autoortho_texture_strict"] is True
     assert options["aoi"] == "area.geojson"
     assert options["aoi_crs"] == "EPSG:4326"
     assert options["infer_tiles"] is True
@@ -163,8 +172,15 @@ def test_build_form_to_request() -> None:
     assert options["allow_triangle_overage"] is True
     assert options["runner"] == ["python", "runner.py", "--demo"]
     assert options["dsftool"] == ["dsftool.exe"]
+    assert options["ddstool"] == ["ddstool.exe"]
+    assert options["dsf_validation"] == "bounds"
+    assert options["dsf_validation_workers"] == 6
+    assert options["validate_all"] is True
+    assert options["dds_validation"] == "ddstool"
+    assert options["dds_strict"] is True
     assert options["global_scenery"] == "Global Scenery"
     assert options["enrich_xp12"] is True
+    assert options["xp12_strict"] is True
     assert options["profile"] is True
     assert options["metrics_json"] == "metrics.json"
 
@@ -217,6 +233,7 @@ def test_build_form_to_request_uses_tool_defaults(monkeypatch) -> None:
         return {
             "ortho4xp": Path("Ortho4XP_v140.py"),
             "dsftool": Path("DSFTool.exe"),
+            "ddstool": Path("DDSTool.exe"),
         }
 
     monkeypatch.setattr(gui, "load_tool_paths", fake_load_tool_paths)
@@ -259,6 +276,7 @@ def test_build_form_to_request_uses_tool_defaults(monkeypatch) -> None:
     assert "--ortho-root" in options["runner"]
     assert "--python" in options["runner"]
     assert "--batch" in options["runner"]
+    assert options["ddstool"] == ["DDSTool.exe"]
     assert options["dsftool"] == ["DSFTool.exe"]
 
 

@@ -309,6 +309,10 @@ def run_wizard(
         "DSFTool command override (blank for defaults)",
         options.get("dsftool"),
     )
+    ddstool_cmd = _prompt_command(
+        "DDSTool command override (blank for defaults)",
+        options.get("ddstool"),
+    )
     runner_timeout = _prompt_optional_float(
         "Runner timeout seconds (blank for none)",
         options.get("runner_timeout"),
@@ -333,6 +337,28 @@ def run_wizard(
         "DSFTool retries",
         int(options.get("dsftool_retries", 0) or 0),
     )
+    dsf_validation = _prompt_choice(
+        "DSF validation mode",
+        ("roundtrip", "bounds", "none"),
+        options.get("dsf_validation", "roundtrip"),
+    )
+    dsf_validation_workers = _prompt_optional_int(
+        "DSF validation workers (blank = cores/2)",
+        options.get("dsf_validation_workers"),
+    )
+    validate_all = _prompt_bool(
+        "Validate all tiles (including warning/error tiles)",
+        bool(options.get("validate_all", False)),
+    )
+    dds_validation = _prompt_choice(
+        "DDS validation mode",
+        ("none", "header", "ddstool"),
+        options.get("dds_validation", "none"),
+    )
+    dds_strict = _prompt_bool(
+        "Fail DDS validation on errors",
+        bool(options.get("dds_strict", False)),
+    )
 
     quality = _prompt_choice(
         "Raster quality",
@@ -348,6 +374,14 @@ def run_wizard(
         "Enable AutoOrtho mode (skip downloads)",
         bool(options.get("autoortho", False)),
     )
+    autoortho_texture_strict = bool(options.get("autoortho_texture_strict", False))
+    if autoortho:
+        autoortho_texture_strict = _prompt_bool(
+            "Fail on missing/invalid AutoOrtho textures",
+            autoortho_texture_strict,
+        )
+    else:
+        autoortho_texture_strict = False
     skip_normalize = _prompt_bool(
         "Skip DEM normalization",
         not bool(options.get("normalize", True)),
@@ -425,6 +459,14 @@ def run_wizard(
     enrich_xp12 = bool(options.get("enrich_xp12", False))
     if global_scenery:
         enrich_xp12 = _prompt_bool("Enrich XP12 rasters", enrich_xp12)
+    xp12_strict = bool(options.get("xp12_strict", False))
+    if global_scenery:
+        xp12_strict = _prompt_bool(
+            "Fail when XP12 rasters are missing",
+            xp12_strict,
+        )
+    else:
+        xp12_strict = False
     profile = _prompt_bool("Profile build", bool(options.get("profile", False)))
     metrics_json = options.get("metrics_json")
     if profile:
@@ -446,6 +488,12 @@ def run_wizard(
         "normalize": not skip_normalize,
         "runner": runner_cmd,
         "dsftool": dsftool_cmd,
+        "ddstool": ddstool_cmd,
+        "dsf_validation": dsf_validation,
+        "dsf_validation_workers": dsf_validation_workers,
+        "validate_all": validate_all,
+        "dds_validation": dds_validation,
+        "dds_strict": dds_strict,
         "aoi": aoi_path,
         "aoi_crs": aoi_crs,
         "infer_tiles": infer_tiles_flag,
@@ -467,6 +515,8 @@ def run_wizard(
         "allow_triangle_overage": allow_triangle_overage,
         "global_scenery": global_scenery or None,
         "enrich_xp12": enrich_xp12 if global_scenery else False,
+        "xp12_strict": xp12_strict if global_scenery else False,
+        "autoortho_texture_strict": autoortho_texture_strict,
         "runner_timeout": runner_timeout,
         "runner_retries": runner_retries,
         "runner_stream_logs": runner_stream_logs,

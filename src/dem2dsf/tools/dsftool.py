@@ -129,6 +129,32 @@ def dsftool_7z_hint(tool_cmd: Sequence[str] | Path | str, dsf_path: Path) -> str
     return None
 
 
+def dsf_to_text(
+    tool_cmd: Sequence[str] | Path | str,
+    dsf_path: Path,
+    text_path: Path,
+    *,
+    timeout: float | None = None,
+    retries: int = 0,
+) -> None:
+    """Convert a DSF file to text with DSFTool."""
+    hint = dsftool_7z_hint(tool_cmd, dsf_path)
+    if hint and "cannot read" in hint:
+        raise RuntimeError(f"DSFTool dsf2text failed: {hint}")
+
+    result = run_dsftool(
+        tool_cmd,
+        ["--dsf2text", str(dsf_path), str(text_path)],
+        timeout=timeout,
+        retries=retries,
+    )
+    if result.returncode != 0:
+        message = result.stderr.strip() or "unknown error"
+        if hint:
+            message = f"{message} ({hint})"
+        raise RuntimeError(f"DSFTool dsf2text failed: {message}")
+
+
 def roundtrip_dsf(
     tool_cmd: Sequence[str] | Path | str,
     dsf_path: Path,

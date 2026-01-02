@@ -53,8 +53,16 @@ class BuildOptions:
     autoortho: bool
     runner: list[str] | None
     dsftool: list[str] | None
+    ddstool: list[str] | None
+    dsf_validation: str
+    dsf_validation_workers: int | None
+    validate_all: bool
+    dds_validation: str
+    dds_strict: bool
     global_scenery: str | None
     enrich_xp12: bool
+    xp12_strict: bool
+    autoortho_texture_strict: bool
     target_crs: str | None
     target_resolution: float | None
     resampling: str
@@ -93,8 +101,16 @@ class BuildOptions:
             "density": self.density,
             "runner": self.runner,
             "dsftool": self.dsftool,
+            "ddstool": self.ddstool,
+            "dsf_validation": self.dsf_validation,
+            "dsf_validation_workers": self.dsf_validation_workers,
+            "validate_all": self.validate_all,
+            "dds_validation": self.dds_validation,
+            "dds_strict": self.dds_strict,
             "global_scenery": self.global_scenery,
             "enrich_xp12": self.enrich_xp12,
+            "xp12_strict": self.xp12_strict,
+            "autoortho_texture_strict": self.autoortho_texture_strict,
             "target_crs": self.target_crs,
             "target_resolution": self.target_resolution,
             "resampling": self.resampling,
@@ -145,8 +161,16 @@ def _build_options_from_args(
         autoortho=resolved_autoortho,
         runner=runner if runner is not None else getattr(args, "runner", None),
         dsftool=getattr(args, "dsftool", None),
+        ddstool=getattr(args, "ddstool", None),
+        dsf_validation=getattr(args, "dsf_validation", "roundtrip"),
+        dsf_validation_workers=getattr(args, "dsf_validation_workers", None),
+        validate_all=bool(getattr(args, "validate_all", False)),
+        dds_validation=getattr(args, "dds_validation", "none"),
+        dds_strict=bool(getattr(args, "dds_strict", False)),
         global_scenery=getattr(args, "global_scenery", None),
         enrich_xp12=bool(getattr(args, "enrich_xp12", False)),
+        xp12_strict=bool(getattr(args, "xp12_strict", False)),
+        autoortho_texture_strict=bool(getattr(args, "autoortho_texture_strict", False)),
         target_crs=getattr(args, "target_crs", None),
         target_resolution=getattr(args, "target_resolution", None),
         resampling=args.resampling,
@@ -230,6 +254,39 @@ def _add_build_parser(subparsers: argparse._SubParsersAction) -> None:
         help="Command to invoke DSFTool for DSF validation.",
     )
     build.add_argument(
+        "--dsf-validation",
+        choices=("none", "bounds", "roundtrip"),
+        default="roundtrip",
+        help="DSF validation mode (bounds parses properties; roundtrip runs dsf2text+text2dsf).",
+    )
+    build.add_argument(
+        "--dsf-validation-workers",
+        type=int,
+        default=None,
+        help="Parallel DSF validation workers (default: half of CPU cores).",
+    )
+    build.add_argument(
+        "--validate-all",
+        action="store_true",
+        help="Validate tiles even when they already have warnings/errors.",
+    )
+    build.add_argument(
+        "--ddstool",
+        nargs="+",
+        help="Command to invoke DDSTool for DDS validation.",
+    )
+    build.add_argument(
+        "--dds-validation",
+        choices=("none", "header", "ddstool"),
+        default="none",
+        help="DDS validation mode (header is fast; ddstool runs --info).",
+    )
+    build.add_argument(
+        "--dds-strict",
+        action="store_true",
+        help="Treat DDS validation failures as errors.",
+    )
+    build.add_argument(
         "--global-scenery",
         help="Path to a Global Scenery folder for XP12 raster checks.",
     )
@@ -237,6 +294,11 @@ def _add_build_parser(subparsers: argparse._SubParsersAction) -> None:
         "--enrich-xp12",
         action="store_true",
         help="Attempt to copy XP12 rasters from Global Scenery.",
+    )
+    build.add_argument(
+        "--xp12-strict",
+        action="store_true",
+        help="Treat missing XP12 rasters as errors.",
     )
     build.add_argument(
         "--target-crs",
@@ -366,6 +428,11 @@ def _add_build_parser(subparsers: argparse._SubParsersAction) -> None:
     build.add_argument("--dry-run", action="store_true", help="Write plan/report only.")
     build.add_argument("--autoortho", action="store_true", help="Enable AutoOrtho mode.")
     build.add_argument(
+        "--autoortho-texture-strict",
+        action="store_true",
+        help="Treat missing/invalid AutoOrtho textures as errors.",
+    )
+    build.add_argument(
         "--profile",
         action="store_true",
         help="Capture timing metrics in the build report.",
@@ -431,6 +498,39 @@ def _add_wizard_parser(subparsers: argparse._SubParsersAction) -> None:
         help="Command to invoke DSFTool for DSF validation.",
     )
     wizard.add_argument(
+        "--dsf-validation",
+        choices=("none", "bounds", "roundtrip"),
+        default="roundtrip",
+        help="DSF validation mode (bounds parses properties; roundtrip runs dsf2text+text2dsf).",
+    )
+    wizard.add_argument(
+        "--dsf-validation-workers",
+        type=int,
+        default=None,
+        help="Parallel DSF validation workers (default: half of CPU cores).",
+    )
+    wizard.add_argument(
+        "--validate-all",
+        action="store_true",
+        help="Validate tiles even when they already have warnings/errors.",
+    )
+    wizard.add_argument(
+        "--ddstool",
+        nargs="+",
+        help="Command to invoke DDSTool for DDS validation.",
+    )
+    wizard.add_argument(
+        "--dds-validation",
+        choices=("none", "header", "ddstool"),
+        default="none",
+        help="DDS validation mode (header is fast; ddstool runs --info).",
+    )
+    wizard.add_argument(
+        "--dds-strict",
+        action="store_true",
+        help="Treat DDS validation failures as errors.",
+    )
+    wizard.add_argument(
         "--global-scenery",
         help="Path to a Global Scenery folder for XP12 raster checks.",
     )
@@ -438,6 +538,16 @@ def _add_wizard_parser(subparsers: argparse._SubParsersAction) -> None:
         "--enrich-xp12",
         action="store_true",
         help="Attempt to copy XP12 rasters from Global Scenery.",
+    )
+    wizard.add_argument(
+        "--xp12-strict",
+        action="store_true",
+        help="Treat missing XP12 rasters as errors.",
+    )
+    wizard.add_argument(
+        "--autoortho-texture-strict",
+        action="store_true",
+        help="Treat missing/invalid AutoOrtho textures as errors.",
     )
     wizard.add_argument(
         "--target-crs",
@@ -616,6 +726,11 @@ def _add_doctor_parser(subparsers: argparse._SubParsersAction) -> None:
         nargs="+",
         help="Command used to invoke DSFTool.",
     )
+    doctor.add_argument(
+        "--ddstool",
+        nargs="+",
+        help="Command used to invoke DDSTool.",
+    )
 
 
 def _add_autoortho_parser(subparsers: argparse._SubParsersAction) -> None:
@@ -733,6 +848,39 @@ def _add_autoortho_parser(subparsers: argparse._SubParsersAction) -> None:
         help="Command to invoke DSFTool for DSF validation.",
     )
     auto.add_argument(
+        "--dsf-validation",
+        choices=("none", "bounds", "roundtrip"),
+        default="roundtrip",
+        help="DSF validation mode (bounds parses properties; roundtrip runs dsf2text+text2dsf).",
+    )
+    auto.add_argument(
+        "--dsf-validation-workers",
+        type=int,
+        default=None,
+        help="Parallel DSF validation workers (default: half of CPU cores).",
+    )
+    auto.add_argument(
+        "--validate-all",
+        action="store_true",
+        help="Validate tiles even when they already have warnings/errors.",
+    )
+    auto.add_argument(
+        "--ddstool",
+        nargs="+",
+        help="Command to invoke DDSTool for DDS validation.",
+    )
+    auto.add_argument(
+        "--dds-validation",
+        choices=("none", "header", "ddstool"),
+        default="none",
+        help="DDS validation mode (header is fast; ddstool runs --info).",
+    )
+    auto.add_argument(
+        "--dds-strict",
+        action="store_true",
+        help="Treat DDS validation failures as errors.",
+    )
+    auto.add_argument(
         "--global-scenery",
         help="Path to a Global Scenery folder for XP12 raster checks.",
     )
@@ -740,6 +888,11 @@ def _add_autoortho_parser(subparsers: argparse._SubParsersAction) -> None:
         "--enrich-xp12",
         action="store_true",
         help="Attempt to copy XP12 rasters from Global Scenery.",
+    )
+    auto.add_argument(
+        "--xp12-strict",
+        action="store_true",
+        help="Treat missing XP12 rasters as errors.",
     )
     auto.add_argument(
         "--warn-triangles",
@@ -757,6 +910,11 @@ def _add_autoortho_parser(subparsers: argparse._SubParsersAction) -> None:
         "--allow-triangle-overage",
         action="store_true",
         help="Allow triangle estimates above the max threshold.",
+    )
+    auto.add_argument(
+        "--autoortho-texture-strict",
+        action="store_true",
+        help="Treat missing/invalid AutoOrtho textures as errors.",
     )
     auto.add_argument(
         "--batch",
@@ -1088,6 +1246,10 @@ def _apply_tool_defaults(args: argparse.Namespace) -> None:
         dsftool = tool_paths.get("dsftool")
         if dsftool:
             args.dsftool = [str(dsftool)]
+    if hasattr(args, "ddstool") and args.ddstool is None:
+        ddstool = tool_paths.get("ddstool")
+        if ddstool:
+            args.ddstool = [str(ddstool)]
     if hasattr(args, "sevenzip_path") and args.sevenzip_path is None:
         sevenzip = tool_paths.get("7zip") or tool_paths.get("sevenzip")
         if sevenzip:
@@ -1239,6 +1401,7 @@ def main(argv: list[str] | None = None) -> int:
         results = run_doctor(
             ortho_runner=args.runner,
             dsftool_path=args.dsftool,
+            ddstool_path=args.ddstool,
         )
         for result in results:
             LOGGER.info("%s: %s - %s", result.name, result.status, result.detail)

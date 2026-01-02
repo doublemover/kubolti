@@ -117,7 +117,7 @@ def test_run_with_config_restores_when_missing(tmp_path: Path, monkeypatch) -> N
     monkeypatch.setattr(module, "restore_config", fake_restore)
     monkeypatch.setattr(module.subprocess, "run", fake_run)
 
-    module._run_with_config(
+    result, diff = module._run_with_config(
         config_path=config_path,
         config_updates={"foo": "bar"},
         cmd=["ortho"],
@@ -125,6 +125,8 @@ def test_run_with_config_restores_when_missing(tmp_path: Path, monkeypatch) -> N
         persist_config=False,
     )
     assert called["restored"] is True
+    assert result.returncode == 0
+    assert diff is not None
 
 
 def test_run_with_config_persists_when_requested(tmp_path: Path, monkeypatch) -> None:
@@ -146,7 +148,7 @@ def test_run_with_config_persists_when_requested(tmp_path: Path, monkeypatch) ->
     monkeypatch.setattr(module, "restore_config", fake_restore)
     monkeypatch.setattr(module.subprocess, "run", fake_run)
 
-    module._run_with_config(
+    result, diff = module._run_with_config(
         config_path=config_path,
         config_updates={"foo": "bar"},
         cmd=["ortho"],
@@ -154,6 +156,8 @@ def test_run_with_config_persists_when_requested(tmp_path: Path, monkeypatch) ->
         persist_config=True,
     )
     assert called["restored"] is False
+    assert result.returncode == 0
+    assert diff is not None
 
 
 def test_parse_runner_events() -> None:

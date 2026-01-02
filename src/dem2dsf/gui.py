@@ -163,6 +163,7 @@ def _apply_tool_defaults(
     *,
     ortho_root: str | None,
     dsftool_path: str | None,
+    ddstool_path: str | None,
 ) -> None:
     """Fill tool defaults from tool_paths.json when GUI fields are empty."""
     tool_paths = load_tool_paths()
@@ -175,6 +176,10 @@ def _apply_tool_defaults(
         candidate = Path(dsftool_path) if dsftool_path else tool_paths.get("dsftool")
         if candidate:
             options["dsftool"] = [str(candidate)]
+    if options.get("ddstool") is None:
+        candidate = Path(ddstool_path) if ddstool_path else tool_paths.get("ddstool")
+        if candidate:
+            options["ddstool"] = [str(candidate)]
 
 
 def _runner_has_flag(runner: list[str], flag: str) -> bool:
@@ -217,6 +222,7 @@ def build_form_to_request(
         "quality": values.get("quality", "compat"),
         "density": values.get("density", "medium"),
         "autoortho": bool(values.get("autoortho", False)),
+        "autoortho_texture_strict": bool(values.get("autoortho_texture_strict", False)),
         "aoi": values.get("aoi_path") or None,
         "aoi_crs": values.get("aoi_crs") or None,
         "infer_tiles": bool(values.get("infer_tiles", False)),
@@ -234,6 +240,7 @@ def build_form_to_request(
         "allow_triangle_overage": bool(values.get("allow_triangle_overage", False)),
         "global_scenery": values.get("global_scenery") or None,
         "enrich_xp12": bool(values.get("enrich_xp12", False)),
+        "xp12_strict": bool(values.get("xp12_strict", False)),
         "profile": bool(values.get("profile", False)),
         "metrics_json": values.get("metrics_json") or None,
         "dem_stack_path": dem_stack or None,
@@ -248,6 +255,11 @@ def build_form_to_request(
         "runner_stream_logs": bool(values.get("runner_stream_logs", False)),
         "dsftool_timeout": parse_optional_float(values.get("dsftool_timeout", "")),
         "dsftool_retries": parse_optional_int(values.get("dsftool_retries", "") or "0") or 0,
+        "dsf_validation": values.get("dsf_validation") or "roundtrip",
+        "dsf_validation_workers": parse_optional_int(values.get("dsf_validation_workers", "")),
+        "validate_all": bool(values.get("validate_all", False)),
+        "dds_validation": values.get("dds_validation") or "none",
+        "dds_strict": bool(values.get("dds_strict", False)),
         "bundle_diagnostics": bool(values.get("bundle_diagnostics", False)),
     }
     ortho_root = values.get("ortho_root") or None
@@ -255,6 +267,7 @@ def build_form_to_request(
     ortho_batch = bool(values.get("ortho_batch", False))
     persist_config = bool(values.get("persist_config", False))
     dsftool_path = values.get("dsftool_path") or None
+    ddstool_path = values.get("ddstool_path") or None
     runner_override = parse_command(values.get("runner_cmd", ""))
     if runner_override:
         options["runner"] = runner_override
@@ -264,10 +277,13 @@ def build_form_to_request(
             options["runner"] = [*runner, "--ortho-root", str(ortho_root)]
     if dsftool_path:
         options["dsftool"] = [dsftool_path]
+    if ddstool_path:
+        options["ddstool"] = [ddstool_path]
     _apply_tool_defaults(
         options,
         ortho_root=ortho_root,
         dsftool_path=dsftool_path,
+        ddstool_path=ddstool_path,
     )
     _apply_runner_overrides(
         options,
@@ -325,6 +341,7 @@ def launch_gui() -> None:
         "quality": tk.StringVar(value="compat"),
         "density": tk.StringVar(value="medium"),
         "autoortho": tk.BooleanVar(value=False),
+        "autoortho_texture_strict": tk.BooleanVar(value=False),
         "skip_normalize": tk.BooleanVar(value=False),
         "tile_jobs": tk.StringVar(value="1"),
         "triangle_warn": tk.StringVar(),
@@ -335,6 +352,12 @@ def launch_gui() -> None:
         "ortho_python": tk.StringVar(),
         "ortho_batch": tk.BooleanVar(value=False),
         "dsftool_path": tk.StringVar(),
+        "ddstool_path": tk.StringVar(),
+        "dsf_validation": tk.StringVar(value="roundtrip"),
+        "dsf_validation_workers": tk.StringVar(),
+        "validate_all": tk.BooleanVar(value=False),
+        "dds_validation": tk.StringVar(value="none"),
+        "dds_strict": tk.BooleanVar(value=False),
         "target_crs": tk.StringVar(value="EPSG:4326"),
         "resampling": tk.StringVar(value="bilinear"),
         "target_resolution": tk.StringVar(),
@@ -344,6 +367,7 @@ def launch_gui() -> None:
         "fallback_dems": tk.StringVar(),
         "global_scenery": tk.StringVar(),
         "enrich_xp12": tk.BooleanVar(value=False),
+        "xp12_strict": tk.BooleanVar(value=False),
         "profile": tk.BooleanVar(value=False),
         "metrics_json": tk.StringVar(),
         "dry_run": tk.BooleanVar(value=False),
@@ -438,6 +462,11 @@ def launch_gui() -> None:
         path = filedialog.askopenfilename(title="Select DSFTool executable")
         if path:
             build_vars["dsftool_path"].set(path)
+
+    def browse_ddstool() -> None:
+        path = filedialog.askopenfilename(title="Select DDSTool executable")
+        if path:
+            build_vars["ddstool_path"].set(path)
 
     def browse_fallback() -> None:
         paths = filedialog.askopenfilenames(title="Select fallback DEMs")
@@ -650,6 +679,12 @@ def launch_gui() -> None:
     row += 1
     ttk.Checkbutton(
         build_frame,
+        text="AutoOrtho textures strict",
+        variable=build_vars["autoortho_texture_strict"],
+    ).grid(row=row, column=1, sticky="w", padx=4, pady=4)
+    row += 1
+    ttk.Checkbutton(
+        build_frame,
         text="Skip normalization",
         variable=build_vars["skip_normalize"],
     ).grid(row=row, column=1, sticky="w", padx=4, pady=4)
@@ -751,11 +786,49 @@ def launch_gui() -> None:
         ttk.Button(build_frame, text="Browse", command=browse_dsftool),
     )
     row += 1
+    ddstool_entry = ttk.Entry(build_frame, textvariable=build_vars["ddstool_path"])
+    add_row_with_button(
+        build_frame,
+        "DDSTool path",
+        ddstool_entry,
+        row,
+        ttk.Button(build_frame, text="Browse", command=browse_ddstool),
+    )
+    row += 1
     dsftool_timeout_entry = ttk.Entry(build_frame, textvariable=build_vars["dsftool_timeout"])
     add_row(build_frame, "DSFTool timeout (s)", dsftool_timeout_entry, row)
     row += 1
     dsftool_retries_entry = ttk.Entry(build_frame, textvariable=build_vars["dsftool_retries"])
     add_row(build_frame, "DSFTool retries", dsftool_retries_entry, row)
+    row += 1
+    dsf_validation_box = ttk.Combobox(
+        build_frame,
+        textvariable=build_vars["dsf_validation"],
+        values=["roundtrip", "bounds", "none"],
+    )
+    add_row(build_frame, "DSF validation", dsf_validation_box, row)
+    row += 1
+    dsf_workers_entry = ttk.Entry(build_frame, textvariable=build_vars["dsf_validation_workers"])
+    add_row(build_frame, "DSF validation workers", dsf_workers_entry, row)
+    row += 1
+    ttk.Checkbutton(
+        build_frame,
+        text="Validate all tiles",
+        variable=build_vars["validate_all"],
+    ).grid(row=row, column=1, sticky="w", padx=4, pady=4)
+    row += 1
+    dds_validation_box = ttk.Combobox(
+        build_frame,
+        textvariable=build_vars["dds_validation"],
+        values=["none", "header", "ddstool"],
+    )
+    add_row(build_frame, "DDS validation", dds_validation_box, row)
+    row += 1
+    ttk.Checkbutton(
+        build_frame,
+        text="DDS validation strict",
+        variable=build_vars["dds_strict"],
+    ).grid(row=row, column=1, sticky="w", padx=4, pady=4)
     row += 1
     target_crs_entry = ttk.Entry(build_frame, textvariable=build_vars["target_crs"])
     add_row(build_frame, "Target CRS", target_crs_entry, row)
@@ -803,6 +876,12 @@ def launch_gui() -> None:
     row += 1
     ttk.Checkbutton(
         build_frame, text="Enrich XP12 rasters", variable=build_vars["enrich_xp12"]
+    ).grid(row=row, column=1, sticky="w", padx=4, pady=4)
+    row += 1
+    ttk.Checkbutton(
+        build_frame,
+        text="XP12 raster strict",
+        variable=build_vars["xp12_strict"],
     ).grid(row=row, column=1, sticky="w", padx=4, pady=4)
     row += 1
     ttk.Checkbutton(build_frame, text="Profile build", variable=build_vars["profile"]).grid(

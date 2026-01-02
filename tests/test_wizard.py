@@ -57,12 +57,18 @@ def test_wizard_interactive(monkeypatch, tmp_path) -> None:
             "",  # output dir
             "",  # runner override
             "",  # dsftool override
+            "",  # ddstool override
             "",  # runner timeout
             "",  # runner retries
             "",  # runner stream logs
             "",  # persist config
             "",  # dsftool timeout
             "",  # dsftool retries
+            "",  # dsf validation mode
+            "",  # dsf validation workers
+            "",  # validate all
+            "",  # dds validation mode
+            "",  # dds strict
             "",  # quality
             "",  # density
             "",  # autoortho
@@ -123,12 +129,18 @@ def test_wizard_interactive_stack(monkeypatch, tmp_path) -> None:
             "",  # output dir
             "",  # runner override
             "",  # dsftool override
+            "",  # ddstool override
             "",  # runner timeout
             "",  # runner retries
             "",  # runner stream logs
             "",  # persist config
             "",  # dsftool timeout
             "",  # dsftool retries
+            "",  # dsf validation mode
+            "",  # dsf validation workers
+            "",  # validate all
+            "",  # dds validation mode
+            "",  # dds strict
             "",  # quality
             "",  # density
             "",  # autoortho
@@ -176,14 +188,21 @@ def test_wizard_interactive_applies_options(monkeypatch, tmp_path) -> None:
             "custom_out",
             "python runner.py --demo",
             "dsftool.exe",
+            "ddstool.exe",
             "120",
             "2",
             "y",
             "y",
             "30",
             "3",
+            "bounds",
+            "8",
+            "y",
+            "ddstool",
+            "y",
             "xp12-enhanced",
             "high",
+            "y",
             "y",
             "n",
             "",  # target crs
@@ -201,6 +220,7 @@ def test_wizard_interactive_applies_options(monkeypatch, tmp_path) -> None:
             "456",
             "y",
             "Global Scenery",
+            "y",
             "y",
             "y",
             "metrics.json",
@@ -230,9 +250,16 @@ def test_wizard_interactive_applies_options(monkeypatch, tmp_path) -> None:
     assert captured["quality"] == "xp12-enhanced"
     assert captured["density"] == "high"
     assert captured["autoortho"] is True
+    assert captured["autoortho_texture_strict"] is True
     assert captured["normalize"] is True
     assert captured["runner"][:3] == ["python", "runner.py", "--demo"]
     assert captured["dsftool"] == ["dsftool.exe"]
+    assert captured["ddstool"] == ["ddstool.exe"]
+    assert captured["dsf_validation"] == "bounds"
+    assert captured["dsf_validation_workers"] == 8
+    assert captured["validate_all"] is True
+    assert captured["dds_validation"] == "ddstool"
+    assert captured["dds_strict"] is True
     assert captured["dst_nodata"] == 1.0
     assert captured["tile_jobs"] == 4
     assert captured["triangle_warn"] == 123
@@ -251,6 +278,7 @@ def test_wizard_interactive_applies_options(monkeypatch, tmp_path) -> None:
     assert captured["dsftool_retries"] == 3
     assert captured["global_scenery"] == "Global Scenery"
     assert captured["enrich_xp12"] is True
+    assert captured["xp12_strict"] is True
     assert captured["profile"] is True
     assert captured["metrics_json"] == "metrics.json"
     assert captured["bundle_diagnostics"] is True
@@ -322,12 +350,18 @@ def test_wizard_fallback_requires_paths(monkeypatch, tmp_path) -> None:
             "",  # output dir
             "",  # runner override
             "",  # dsftool override
+            "",  # ddstool override
             "",  # runner timeout
             "",  # runner retries
             "",  # runner stream logs
             "",  # persist config
             "",  # dsftool timeout
             "",  # dsftool retries
+            "",  # dsf validation mode
+            "",  # dsf validation workers
+            "",  # validate all
+            "",  # dds validation mode
+            "",  # dds strict
             "",  # quality
             "",  # density
             "",  # autoortho

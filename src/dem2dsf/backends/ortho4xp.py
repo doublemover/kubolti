@@ -7,6 +7,7 @@ import os
 import shutil
 import subprocess
 from pathlib import Path
+from typing import Any
 
 from dem2dsf import contracts
 from dem2dsf.backends.base import BackendSpec, BuildRequest, BuildResult
@@ -165,9 +166,14 @@ class Ortho4XPBackend:
                 status = "warning" if status == "ok" else status
                 messages.append("DSF output not found")
             tile_entry = {"tile": tile, "status": status, "messages": messages}
+            metrics = tile_entry.setdefault("metrics", {})
+            metrics["runner_command"] = list(result.args)
             staged_dem = _read_stage_metadata(request.output_dir, tile)
             if staged_dem:
-                tile_entry["metrics"] = {"staged_dem": staged_dem}
+                metrics["staged_dem"] = staged_dem
+            config_diff = _read_config_diff(request.output_dir, tile)
+            if config_diff:
+                metrics["ortho4xp_config_diff"] = config_diff.get("diff", config_diff)
             tile_statuses.append(tile_entry)
 
         report = build_report(
@@ -212,6 +218,33 @@ def _read_stage_metadata(output_dir: Path, tile: str) -> str | None:
     if isinstance(staged, str) and staged:
         return staged
     return None
+
+
+def _read_config_diff(output_dir: Path, tile: str) -> dict[str, Any] | None:
+    log_dir = output_dir / "runner_logs"
+    if not log_dir.exists():
+        return None
+    candidates: list[tuple[int, Path]] = []
+    base_path = log_dir / f"ortho4xp_{tile}.config.json"
+    if base_path.exists():
+        candidates.append((1, base_path))
+    for path in log_dir.glob(f"ortho4xp_{tile}.attempt*.config.json"):
+        name = path.name
+        attempt = 0
+        if ".attempt" in name:
+            suffix = name.split(".attempt", 1)[1]
+            attempt_str = suffix.split(".config", 1)[0]
+            if attempt_str.isdigit():
+                attempt = int(attempt_str)
+        candidates.append((attempt, path))
+    if not candidates:
+        return None
+    _attempt, path = max(candidates, key=lambda item: item[0])
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return None
+    return payload if isinstance(payload, dict) else None
 
 
 def _run_runner(

@@ -36,8 +36,8 @@ dem2dsf --help
   with cache reuse and coverage metrics.
 - Ortho4XP runner orchestration with config overrides, retries, timeouts, and
   per-tile logs plus optional config persistence.
-- DSFTool validation (round-trip + bounds checks) and XP12 raster inventory with
-  optional enrichment from Global Scenery.
+- DSFTool validation (roundtrip or bounds) plus optional DDS validation via
+  DDSTool, and XP12 raster inventory with optional enrichment from Global Scenery.
 - Density presets and triangle guardrails (including the ultra preset).
 - AutoOrtho compatibility checks for texture references.
 - Publish packaging with optional DSF 7-Zip compression and backups.
@@ -120,7 +120,8 @@ Add `--infer-tiles` to let the wizard propose tiles from DEM/AOI bounds, and
 
 Use `--verbose`, `--quiet`, `--log-json`, or `--log-file path.json` to tune CLI
 logging. Ortho4XP runner logs are written under `build/runner_logs/` with
-`.stdout.log`, `.stderr.log`, `.events.json`, and the main `.run.log` per tile.
+`.stdout.log`, `.stderr.log`, `.events.json`, `.config.json`, and the main
+`.run.log` per tile.
 
 ### Coverage and diagnostics
 
@@ -135,6 +136,16 @@ dem2dsf build --dem dem.tif --tile +47+008 --output build \
 dem2dsf build --dem dem.tif --tile +47+008 --output build \
   --quality xp12-enhanced --dsftool /path/to/DSFTool \
   --global-scenery "X-Plane 12/Global Scenery" --enrich-xp12
+```
+
+Optional validation flags:
+
+```bash
+dem2dsf build --dem dem.tif --tile +47+008 --output build \
+  --dsf-validation roundtrip --dsf-validation-workers 4 --validate-all
+
+dem2dsf build --dem dem.tif --tile +47+008 --output build \
+  --dds-validation ddstool --ddstool /path/to/DDSTool --dds-strict
 ```
 
 ### Publish artifacts

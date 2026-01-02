@@ -392,6 +392,54 @@ def test_apply_autoortho_checks(monkeypatch) -> None:
     assert report["warnings"]
 
 
+def test_apply_dds_validation_header(tmp_path: Path) -> None:
+    textures_dir = tmp_path / "textures"
+    textures_dir.mkdir(parents=True, exist_ok=True)
+    good = textures_dir / "good.dds"
+    bad = textures_dir / "bad.dds"
+    good.write_bytes(b"DDS " + b"\x00" * 16)
+    bad.write_bytes(b"BAD " + b"\x00" * 16)
+
+    report = {"tiles": [{"tile": "+47+008", "status": "ok"}]}
+    build._apply_dds_validation(report, {"dds_validation": "header"}, tmp_path)
+
+    artifacts = report["artifacts"]["dds_validation"]
+    assert str(bad) in artifacts["invalid_headers"]
+    assert report["warnings"]
+
+
+def test_apply_dds_validation_missing_ddstool_strict(tmp_path: Path) -> None:
+    report = {"tiles": [{"tile": "+47+008", "status": "ok"}]}
+    build._apply_dds_validation(
+        report,
+        {"dds_validation": "ddstool", "dds_strict": True},
+        tmp_path,
+    )
+    assert report["errors"]
+    assert report["tiles"][0]["status"] == "error"
+
+
+def test_apply_dds_validation_ddstool_failure(monkeypatch, tmp_path: Path) -> None:
+    textures_dir = tmp_path / "textures"
+    textures_dir.mkdir(parents=True, exist_ok=True)
+    good = textures_dir / "good.dds"
+    good.write_bytes(b"DDS " + b"\x00" * 16)
+
+    monkeypatch.setattr(
+        build, "ddstool_info", lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("boom"))
+    )
+
+    report = {"tiles": [{"tile": "+47+008", "status": "ok"}]}
+    build._apply_dds_validation(
+        report,
+        {"dds_validation": "ddstool", "ddstool": ["tool"]},
+        tmp_path,
+    )
+    artifacts = report["artifacts"]["dds_validation"]
+    assert artifacts["ddstool_failures"]
+    assert report["warnings"]
+
+
 def test_apply_dsf_validation_missing_dsftool() -> None:
     report = {"tiles": [{"tile": "+47+008", "status": "ok"}]}
     build._apply_dsf_validation(report, {}, Path("out"))

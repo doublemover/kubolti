@@ -379,11 +379,13 @@ def test_cli_build_uses_tool_paths(monkeypatch, tmp_path: Path) -> None:
     ortho_script.write_text("stub", encoding="utf-8")
     dsftool = tmp_path / "DSFTool.exe"
     dsftool.write_text("stub", encoding="utf-8")
+    ddstool = tmp_path / "DDSTool.exe"
+    ddstool.write_text("stub", encoding="utf-8")
 
     monkeypatch.setattr(
         cli,
         "load_tool_paths",
-        lambda *_: {"ortho4xp": ortho_script, "dsftool": dsftool},
+        lambda *_: {"ortho4xp": ortho_script, "dsftool": dsftool, "ddstool": ddstool},
     )
     monkeypatch.setattr(cli, "_default_ortho_runner", lambda: [sys.executable, "runner.py"])
 
@@ -400,6 +402,7 @@ def test_cli_build_uses_tool_paths(monkeypatch, tmp_path: Path) -> None:
     assert captured["runner"][0] == sys.executable
     assert "--ortho-root" in captured["runner"]
     assert captured["dsftool"] == [str(dsftool)]
+    assert captured["ddstool"] == [str(ddstool)]
 
 
 def test_cli_publish_uses_tool_paths(monkeypatch, tmp_path: Path) -> None:

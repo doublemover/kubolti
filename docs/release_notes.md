@@ -43,4 +43,4 @@ content matches the scope below.
 ### Notes
 - Ortho4XP config overrides are restored by default; use persist config to keep them.
 - Integration tests that require external tools auto-skip when tools are missing.
-- DDSTool ships with XPTools but is not invoked by dem2dsf yet.
+- Optional DDS validation via DDSTool (`--dds-validation`).

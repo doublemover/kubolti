@@ -306,12 +306,10 @@ def patch_config_values(
     return original
 
 
-def read_config_values(config_path: Path) -> dict[str, str]:
-    """Read key/value pairs from Ortho4XP.cfg."""
-    if not config_path.exists():
-        return {}
+def parse_config_values(text: str) -> dict[str, str]:
+    """Parse key/value pairs from Ortho4XP.cfg content."""
     values: dict[str, str] = {}
-    for raw_line in config_path.read_text(encoding="utf-8").splitlines():
+    for raw_line in text.splitlines():
         line = raw_line.strip()
         if not line or line.startswith("#"):
             continue
@@ -322,6 +320,13 @@ def read_config_values(config_path: Path) -> dict[str, str]:
         key, value = line.split("=", 1)
         values[key.strip()] = value.strip().strip("\"'")
     return values
+
+
+def read_config_values(config_path: Path) -> dict[str, str]:
+    """Read key/value pairs from Ortho4XP.cfg."""
+    if not config_path.exists():
+        return {}
+    return parse_config_values(config_path.read_text(encoding="utf-8"))
 
 
 def restore_config(config_path: Path, original: str | None) -> None:
