@@ -20,6 +20,7 @@ python -m dem2dsf gui
 - Runner timeout/retry/stream toggles control reliability and log streaming.
 - Persist Ortho4XP.cfg keeps config overrides after the run (default restores).
 - Use the Infer button or infer checkbox to populate tiles from DEM/AOI bounds (explicit opt-in).
+- Build logs include rough mesh size/time warnings when target resolution is very fine.
 - Override destination nodata and triangle guardrails when tuning raster output.
 - DSF validation mode/workers and DDS validation mode/strict control post-build checks.
 - Mosaic strategy and coverage thresholds tune normalization behavior.

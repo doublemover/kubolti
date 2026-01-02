@@ -12,6 +12,8 @@ from pathlib import Path
 
 from dem2dsf import __version__
 from dem2dsf.build import run_build
+from dem2dsf.build_config import load_build_config
+from dem2dsf.clean import clean_build, format_clean_summary, supported_clean_targets
 from dem2dsf.dem.stack import load_dem_stack
 from dem2dsf.density import DENSITY_PRESETS
 from dem2dsf.doctor import run_doctor
@@ -87,6 +89,7 @@ class BuildOptions:
     dsftool_retries: int
     bundle_diagnostics: bool
     dry_run: bool
+    resume: str | None
     dem_stack_path: str | None
     aoi: str | None
     aoi_crs: str | None
@@ -135,6 +138,7 @@ class BuildOptions:
             "dsftool_retries": self.dsftool_retries,
             "bundle_diagnostics": self.bundle_diagnostics,
             "dry_run": self.dry_run,
+            "resume": self.resume,
             "dem_stack_path": self.dem_stack_path,
             "aoi": self.aoi,
             "aoi_crs": self.aoi_crs,
@@ -195,6 +199,7 @@ def _build_options_from_args(
         dsftool_retries=int(getattr(args, "dsftool_retries", 0) or 0),
         bundle_diagnostics=bool(getattr(args, "bundle_diagnostics", False)),
         dry_run=dry_run if dry_run is not None else bool(getattr(args, "dry_run", False)),
+        resume=getattr(args, "resume", None),
         dem_stack_path=getattr(args, "dem_stack", None),
         aoi=getattr(args, "aoi", None),
         aoi_crs=getattr(args, "aoi_crs", None),
@@ -244,6 +249,10 @@ def _add_build_parser(subparsers: argparse._SubParsersAction) -> None:
         help="Output directory for build artifacts.",
     )
     build.add_argument(
+        "--config",
+        help="Path to a JSON build config file.",
+    )
+    build.add_argument(
         "--runner",
         nargs="+",
         help="Command to invoke the Ortho4XP runner.",
@@ -252,6 +261,10 @@ def _add_build_parser(subparsers: argparse._SubParsersAction) -> None:
         "--dsftool",
         nargs="+",
         help="Command to invoke DSFTool for DSF validation.",
+    )
+    build.add_argument(
+        "--dsftool-path",
+        help="Path to the DSFTool binary (shorthand for --dsftool).",
     )
     build.add_argument(
         "--dsf-validation",
@@ -426,6 +439,13 @@ def _add_build_parser(subparsers: argparse._SubParsersAction) -> None:
         help="Allow triangle estimates above the max threshold.",
     )
     build.add_argument("--dry-run", action="store_true", help="Write plan/report only.")
+    build.add_argument(
+        "--resume",
+        nargs="?",
+        const="build",
+        choices=("build", "validate-only"),
+        help="Skip tiles already built (ok). Use 'validate-only' to rerun checks without rebuilding.",
+    )
     build.add_argument("--autoortho", action="store_true", help="Enable AutoOrtho mode.")
     build.add_argument(
         "--autoortho-texture-strict",
@@ -496,6 +516,10 @@ def _add_wizard_parser(subparsers: argparse._SubParsersAction) -> None:
         "--dsftool",
         nargs="+",
         help="Command to invoke DSFTool for DSF validation.",
+    )
+    wizard.add_argument(
+        "--dsftool-path",
+        help="Path to the DSFTool binary (shorthand for --dsftool).",
     )
     wizard.add_argument(
         "--dsf-validation",
@@ -727,6 +751,10 @@ def _add_doctor_parser(subparsers: argparse._SubParsersAction) -> None:
         help="Command used to invoke DSFTool.",
     )
     doctor.add_argument(
+        "--dsftool-path",
+        help="Path to the DSFTool binary (shorthand for --dsftool).",
+    )
+    doctor.add_argument(
         "--ddstool",
         nargs="+",
         help="Command used to invoke DDSTool.",
@@ -846,6 +874,10 @@ def _add_autoortho_parser(subparsers: argparse._SubParsersAction) -> None:
         "--dsftool",
         nargs="+",
         help="Command to invoke DSFTool for DSF validation.",
+    )
+    auto.add_argument(
+        "--dsftool-path",
+        help="Path to the DSFTool binary (shorthand for --dsftool).",
     )
     auto.add_argument(
         "--dsf-validation",
@@ -1052,6 +1084,10 @@ def _add_patch_parser(subparsers: argparse._SubParsersAction) -> None:
         help="Optional DSFTool override.",
     )
     patch.add_argument(
+        "--dsftool-path",
+        help="Path to the DSFTool binary (shorthand for --dsftool).",
+    )
+    patch.add_argument(
         "--dry-run",
         action="store_true",
         help="Write patch plan/report only.",
@@ -1123,6 +1159,32 @@ def _add_cache_parser(subparsers: argparse._SubParsersAction) -> None:
     cache_purge.add_argument(
         "--output",
         help="Optional path to write the purge report JSON.",
+    )
+
+
+def _add_clean_parser(subparsers: argparse._SubParsersAction) -> None:
+    """Register the build cleanup subcommand."""
+    clean = subparsers.add_parser("clean", help="Remove cached build artifacts.")
+    clean.add_argument(
+        "--build-dir",
+        default="build",
+        help="Build directory to clean.",
+    )
+    clean.add_argument(
+        "--include",
+        action="append",
+        choices=tuple(supported_clean_targets()),
+        help="Artifact groups to remove (repeatable).",
+    )
+    clean.add_argument(
+        "--all",
+        action="store_true",
+        help="Clean all supported artifact groups.",
+    )
+    clean.add_argument(
+        "--confirm",
+        action="store_true",
+        help="Apply deletions (default is dry-run).",
     )
 
 
@@ -1238,6 +1300,172 @@ def _default_ortho_runner() -> list[str] | None:
     return [sys.executable, "-m", "dem2dsf.runners.ortho4xp"]
 
 
+def _argv_has_flag(argv: list[str], *flags: str) -> bool:
+    for token in argv:
+        for flag in flags:
+            if token == flag or token.startswith(f"{flag}="):
+                return True
+    return False
+
+
+def _coerce_list(value: object) -> list[str] | None:
+    if value is None:
+        return None
+    if isinstance(value, (list, tuple)):
+        return [str(item) for item in value]
+    if isinstance(value, str):
+        return [value]
+    return [str(value)]
+
+
+def _tiles_from_report(build_dir: Path) -> list[str] | None:
+    report_path = build_dir / "build_report.json"
+    if not report_path.exists():
+        return None
+    try:
+        payload = json.loads(report_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(payload, dict):
+        return None
+    tiles = []
+    for entry in payload.get("tiles", []):
+        if not isinstance(entry, dict):
+            continue
+        tile = entry.get("tile")
+        if tile:
+            tiles.append(str(tile))
+    return tiles or None
+
+
+def _apply_dsftool_path(args: argparse.Namespace) -> None:
+    if hasattr(args, "dsftool_path") and getattr(args, "dsftool_path", None):
+        if getattr(args, "dsftool", None) is None:
+            args.dsftool = [str(args.dsftool_path)]
+
+
+def _apply_build_config(
+    args: argparse.Namespace,
+    config: object | None,
+    argv: list[str],
+) -> None:
+    if config is None:
+        return
+    inputs = getattr(config, "inputs", {})
+    options = getattr(config, "options", {})
+    tools = getattr(config, "tools", {})
+    output_dir = getattr(config, "output_dir", None)
+
+    if inputs.get("dem_stack") and not _argv_has_flag(argv, "--dem-stack", "--dem"):
+        args.dem_stack = inputs.get("dem_stack")
+        args.dem = None
+    elif inputs.get("dems") and not _argv_has_flag(argv, "--dem", "--dem-stack"):
+        args.dem = list(inputs.get("dems", []))
+
+    if inputs.get("tiles") and not _argv_has_flag(argv, "--tile"):
+        args.tile = list(inputs.get("tiles", []))
+    if inputs.get("aoi") and not _argv_has_flag(argv, "--aoi"):
+        args.aoi = inputs.get("aoi")
+    if inputs.get("aoi_crs") and not _argv_has_flag(argv, "--aoi-crs"):
+        args.aoi_crs = inputs.get("aoi_crs")
+    if output_dir and not _argv_has_flag(argv, "--output"):
+        args.output = str(output_dir)
+
+    if tools.get("runner") and not _argv_has_flag(argv, "--runner"):
+        args.runner = list(tools.get("runner", []))
+    if tools.get("dsftool") and not _argv_has_flag(argv, "--dsftool", "--dsftool-path"):
+        args.dsftool = list(tools.get("dsftool", []))
+    if tools.get("ddstool") and not _argv_has_flag(argv, "--ddstool"):
+        args.ddstool = list(tools.get("ddstool", []))
+
+    def set_option(flags: tuple[str, ...], attr: str, value: object) -> None:
+        if value is None:
+            return
+        if _argv_has_flag(argv, *flags):
+            return
+        setattr(args, attr, value)
+
+    set_option(("--quality",), "quality", options.get("quality"))
+    set_option(("--density",), "density", options.get("density"))
+    set_option(("--autoortho",), "autoortho", bool(options.get("autoortho", False)))
+    set_option(
+        ("--autoortho-texture-strict",),
+        "autoortho_texture_strict",
+        bool(options.get("autoortho_texture_strict", False)),
+    )
+    set_option(("--infer-tiles",), "infer_tiles", bool(options.get("infer_tiles", False)))
+    set_option(("--target-crs",), "target_crs", options.get("target_crs"))
+    set_option(("--target-resolution",), "target_resolution", options.get("target_resolution"))
+    set_option(("--resampling",), "resampling", options.get("resampling"))
+    set_option(("--dst-nodata",), "dst_nodata", options.get("dst_nodata"))
+    set_option(("--fill-strategy",), "fill_strategy", options.get("fill_strategy"))
+    set_option(("--fill-value",), "fill_value", options.get("fill_value"))
+    if "fallback_dem_paths" in options and not _argv_has_flag(argv, "--fallback-dem"):
+        args.fallback_dem = _coerce_list(options.get("fallback_dem_paths"))
+    if "normalize" in options and not _argv_has_flag(argv, "--skip-normalize"):
+        args.skip_normalize = not bool(options.get("normalize", True))
+    if "coverage_metrics" in options and not _argv_has_flag(argv, "--skip-coverage-metrics"):
+        args.skip_coverage_metrics = not bool(options.get("coverage_metrics", True))
+    if "tile_jobs" in options and not _argv_has_flag(argv, "--tile-jobs", "--jobs"):
+        args.tile_jobs = int(options.get("tile_jobs", 1) or 1)
+    if "warn_triangles" in options and not _argv_has_flag(argv, "--warn-triangles"):
+        args.warn_triangles = int(options.get("warn_triangles"))
+    if "triangle_warn" in options and not _argv_has_flag(argv, "--warn-triangles"):
+        args.warn_triangles = int(options.get("triangle_warn"))
+    if "triangle_max" in options and not _argv_has_flag(argv, "--max-triangles"):
+        args.max_triangles = int(options.get("triangle_max"))
+    if "allow_triangle_overage" in options and not _argv_has_flag(argv, "--allow-triangle-overage"):
+        args.allow_triangle_overage = bool(options.get("allow_triangle_overage", False))
+    if "continue_on_error" in options and not _argv_has_flag(argv, "--continue-on-error"):
+        args.continue_on_error = bool(options.get("continue_on_error", False))
+    if "coverage_min" in options and not _argv_has_flag(argv, "--min-coverage"):
+        args.min_coverage = options.get("coverage_min")
+    if "coverage_hard_fail" in options and not _argv_has_flag(argv, "--coverage-hard-fail"):
+        args.coverage_hard_fail = bool(options.get("coverage_hard_fail", False))
+    if "mosaic_strategy" in options and not _argv_has_flag(argv, "--mosaic-strategy"):
+        args.mosaic_strategy = options.get("mosaic_strategy")
+    if "runner_timeout" in options and not _argv_has_flag(argv, "--runner-timeout"):
+        args.runner_timeout = options.get("runner_timeout")
+    if "runner_retries" in options and not _argv_has_flag(argv, "--runner-retries"):
+        args.runner_retries = options.get("runner_retries")
+    if "runner_stream_logs" in options and not _argv_has_flag(argv, "--runner-stream-logs"):
+        args.runner_stream_logs = bool(options.get("runner_stream_logs", False))
+    if "dsftool_timeout" in options and not _argv_has_flag(argv, "--dsftool-timeout"):
+        args.dsftool_timeout = options.get("dsftool_timeout")
+    if "dsftool_retries" in options and not _argv_has_flag(argv, "--dsftool-retries"):
+        args.dsftool_retries = options.get("dsftool_retries")
+    if "bundle_diagnostics" in options and not _argv_has_flag(argv, "--bundle-diagnostics"):
+        args.bundle_diagnostics = bool(options.get("bundle_diagnostics", False))
+    if "dry_run" in options and not _argv_has_flag(argv, "--dry-run"):
+        args.dry_run = bool(options.get("dry_run", False))
+    if "dem_stack_path" in options and not _argv_has_flag(argv, "--dem-stack", "--dem"):
+        args.dem_stack = options.get("dem_stack_path")
+    if "dsf_validation" in options and not _argv_has_flag(argv, "--dsf-validation"):
+        args.dsf_validation = options.get("dsf_validation")
+    if "dsf_validation_workers" in options and not _argv_has_flag(
+        argv, "--dsf-validation-workers"
+    ):
+        args.dsf_validation_workers = options.get("dsf_validation_workers")
+    if "validate_all" in options and not _argv_has_flag(argv, "--validate-all"):
+        args.validate_all = bool(options.get("validate_all", False))
+    if "dds_validation" in options and not _argv_has_flag(argv, "--dds-validation"):
+        args.dds_validation = options.get("dds_validation")
+    if "dds_strict" in options and not _argv_has_flag(argv, "--dds-strict"):
+        args.dds_strict = bool(options.get("dds_strict", False))
+    if "global_scenery" in options and not _argv_has_flag(argv, "--global-scenery"):
+        args.global_scenery = options.get("global_scenery")
+    if "enrich_xp12" in options and not _argv_has_flag(argv, "--enrich-xp12"):
+        args.enrich_xp12 = bool(options.get("enrich_xp12", False))
+    if "xp12_strict" in options and not _argv_has_flag(argv, "--xp12-strict"):
+        args.xp12_strict = bool(options.get("xp12_strict", False))
+    if "profile" in options and not _argv_has_flag(argv, "--profile"):
+        args.profile = bool(options.get("profile", False))
+    if "metrics_json" in options and not _argv_has_flag(argv, "--metrics-json"):
+        args.metrics_json = options.get("metrics_json")
+    if "resume" in options and not _argv_has_flag(argv, "--resume"):
+        args.resume = options.get("resume")
+
+
 def _apply_tool_defaults(args: argparse.Namespace) -> None:
     """Populate CLI defaults using the tool discovery config."""
     tool_paths = load_tool_paths()
@@ -1303,11 +1531,13 @@ def main(argv: list[str] | None = None) -> int:
     _add_patch_parser(subparsers)
     _add_scan_parser(subparsers)
     _add_cache_parser(subparsers)
+    _add_clean_parser(subparsers)
     _add_publish_parser(subparsers)
     _add_presets_parser(subparsers)
     _add_version_parser(subparsers)
     _add_gui_parser(subparsers)
 
+    argv_list = list(argv) if argv is not None else sys.argv[1:]
     args = parser.parse_args(argv)
     log_file_value = getattr(args, "log_file", None)
     log_options = LogOptions(
@@ -1317,7 +1547,16 @@ def main(argv: list[str] | None = None) -> int:
         json_console=bool(getattr(args, "log_json", False)),
     )
     configure_logging(log_options)
+    _apply_dsftool_path(args)
     _apply_tool_defaults(args)
+    if args.command == "build" and getattr(args, "config", None):
+        try:
+            config = load_build_config(Path(args.config))
+        except (OSError, json.JSONDecodeError, TypeError, ValueError) as exc:
+            LOGGER.error("Failed to load build config: %s", exc)
+            return 1
+        _apply_build_config(args, config, argv_list)
+        _apply_dsftool_path(args)
 
     if args.command == "version":
         print(__version__)
@@ -1328,16 +1567,26 @@ def main(argv: list[str] | None = None) -> int:
         launch_gui()
         return 0
     if args.command == "build":
+        output_dir = Path(args.output)
+        resume_mode = getattr(args, "resume", None)
         if not args.dem and not args.dem_stack:
-            parser.error("--dem or --dem-stack is required for build")
+            if resume_mode == "validate-only":
+                if not (output_dir / "build_plan.json").exists():
+                    parser.error("--dem or --dem-stack is required for build")
+            else:
+                parser.error("--dem or --dem-stack is required for build")
         dem_paths = [Path(path) for path in (args.dem or [])]
         if args.dem_stack:
             stack = load_dem_stack(Path(args.dem_stack))
             dem_paths = [layer.path for layer in stack.layers]
         tiles = args.tile or []
+        if not tiles and resume_mode:
+            tiles = _tiles_from_report(output_dir) or []
         if not tiles:
             if not args.infer_tiles:
                 parser.error("--tile is required for build unless --infer-tiles is set")
+            if not dem_paths:
+                parser.error("Tile inference requires DEM inputs.")
             inference = infer_tiles(
                 dem_paths,
                 aoi_path=Path(args.aoi) if args.aoi else None,
@@ -1353,7 +1602,7 @@ def main(argv: list[str] | None = None) -> int:
             dem_paths=dem_paths,
             tiles=tiles,
             backend_name="ortho4xp",
-            output_dir=Path(args.output),
+            output_dir=output_dir,
             options=options,
         )
         errors = result.build_report.get("errors", [])
@@ -1538,6 +1787,15 @@ def main(argv: list[str] | None = None) -> int:
             else:
                 print(json.dumps(report, indent=2))
             return 0
+    if args.command == "clean":
+        build_dir = Path(args.build_dir)
+        include = list(args.include or [])
+        if args.all or not include:
+            include = list(supported_clean_targets())
+        report = clean_build(build_dir, include=include, dry_run=not args.confirm)
+        for line in format_clean_summary(report):
+            LOGGER.info("%s", line)
+        return 0
     if args.command == "publish":
         sevenzip_path = Path(args.sevenzip_path) if args.sevenzip_path else None
         if args.dsf_7z and sevenzip_path is None:

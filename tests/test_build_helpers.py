@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -580,6 +582,131 @@ def test_run_build_with_stack(monkeypatch, tmp_path: Path) -> None:
     )
 
     assert result.build_report["tiles"] == []
+
+
+def test_run_build_resume_skips_ok_tiles(monkeypatch, tmp_path: Path) -> None:
+    output_dir = tmp_path / "out"
+    output_dir.mkdir()
+    (output_dir / "build_report.json").write_text(
+        json.dumps({"tiles": [{"tile": "+47+008", "status": "ok"}]}),
+        encoding="utf-8",
+    )
+
+    dem_path = tmp_path / "dem.tif"
+    dem_path.write_text("dem", encoding="utf-8")
+    tile_path = tmp_path / "tile.tif"
+    tile_path.write_text("tile", encoding="utf-8")
+    captured: dict[str, list[str]] = {}
+
+    class ResumeBackend:
+        def __init__(self) -> None:
+            self._spec = BackendSpec(
+                name="dummy",
+                version="0",
+                artifact_schema_version="1.1",
+                tile_dem_crs="EPSG:4326",
+                supports_xp12_rasters=False,
+                supports_autoortho=False,
+            )
+
+        def spec(self) -> BackendSpec:
+            return self._spec
+
+        def build(self, request: BuildRequest) -> BuildResult:
+            captured["tiles"] = list(request.tiles)
+            return BuildResult(build_plan={}, build_report={"tiles": [], "warnings": [], "errors": []})
+
+    info = SimpleNamespace(
+        path=dem_path,
+        crs="EPSG:4326",
+        bounds=(0.0, 0.0, 1.0, 1.0),
+        resolution=(1.0, 1.0),
+        nodata=None,
+        vertical_units=None,
+        min_elevation=None,
+        max_elevation=None,
+        nan_ratio=None,
+        nodata_ratio=None,
+    )
+
+    monkeypatch.setattr(build, "get_backend", lambda *_: ResumeBackend())
+    monkeypatch.setattr(build, "inspect_dem", lambda *_args, **_kwargs: info)
+    monkeypatch.setattr(
+        build,
+        "estimate_triangles_from_raster",
+        lambda *_args, **_kwargs: SimpleNamespace(count=0, width=1, height=1),
+    )
+    monkeypatch.setattr(build, "validate_build_plan", lambda *_: None)
+    monkeypatch.setattr(build, "validate_build_report", lambda *_: None)
+
+    result = build.run_build(
+        dem_paths=[dem_path],
+        tiles=["+47+008", "+48+008"],
+        backend_name="dummy",
+        output_dir=output_dir,
+        options={
+            "quality": "compat",
+            "density": "medium",
+            "normalize": False,
+            "tile_dem_paths": {"+47+008": str(tile_path), "+48+008": str(tile_path)},
+            "resume": "build",
+        },
+    )
+
+    assert captured["tiles"] == ["+48+008"]
+    assert any(tile["status"] == "skipped" for tile in result.build_report["tiles"])
+
+
+def test_run_build_resume_validate_only(monkeypatch, tmp_path: Path) -> None:
+    output_dir = tmp_path / "out"
+    output_dir.mkdir()
+    (output_dir / "build_report.json").write_text(
+        json.dumps({"tiles": [{"tile": "+47+008", "status": "ok"}]}),
+        encoding="utf-8",
+    )
+    (output_dir / "build_plan.json").write_text(
+        json.dumps(
+            {
+                "schema_version": "1.1",
+                "backend": {"name": "dummy", "version": "0"},
+                "inputs": {"dems": ["dem.tif"]},
+                "tiles": ["+47+008"],
+                "options": {},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    class ValidateBackend:
+        def __init__(self) -> None:
+            self._spec = BackendSpec(
+                name="dummy",
+                version="0",
+                artifact_schema_version="1.1",
+                tile_dem_crs="EPSG:4326",
+                supports_xp12_rasters=False,
+                supports_autoortho=False,
+            )
+
+        def spec(self) -> BackendSpec:
+            return self._spec
+
+        def build(self, _request: BuildRequest) -> BuildResult:
+            raise AssertionError("backend should not run during resume validate-only")
+
+    monkeypatch.setattr(build, "get_backend", lambda *_: ValidateBackend())
+    monkeypatch.setattr(build, "validate_build_plan", lambda *_: None)
+    monkeypatch.setattr(build, "validate_build_report", lambda *_: None)
+
+    result = build.run_build(
+        dem_paths=[],
+        tiles=[],
+        backend_name="dummy",
+        output_dir=output_dir,
+        options={"quality": "compat", "density": "medium", "resume": "validate-only"},
+    )
+
+    assert result.build_report["artifacts"]["resume_mode"] == "validate-only"
 
 
 def test_run_build_uses_normalization_cache(monkeypatch, tmp_path: Path) -> None:

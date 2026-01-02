@@ -133,6 +133,13 @@ def _recommend_density(infos: list[DemInfo]) -> str | None:
     return "low"
 
 
+def _recommend_target_resolution(infos: list[DemInfo]) -> float | None:
+    resolutions = [value for info in infos if (value := _resolution_to_meters(info))]
+    if not resolutions:
+        return None
+    return min(resolutions)
+
+
 def _inspect_dem_paths(paths: list[Path]) -> list[DemInfo]:
     infos: list[DemInfo] = []
     for path in paths:
@@ -279,8 +286,14 @@ def run_wizard(
         density_default = _recommend_density(infos) or options.get("density", "medium")
         if density_default != options.get("density", "medium"):
             print(f"Recommended density preset: {density_default}")
+        target_resolution_default = options.get("target_resolution")
+        recommended_resolution = _recommend_target_resolution(infos)
+        if target_resolution_default is None and recommended_resolution is not None:
+            target_resolution_default = recommended_resolution
+            print(f"Suggested target resolution: {recommended_resolution:.1f}m")
     else:
         density_default = options.get("density", "medium")
+        target_resolution_default = options.get("target_resolution")
 
     if not tiles and infer_tiles_flag:
         inference = infer_tiles(
@@ -388,7 +401,7 @@ def run_wizard(
     )
     target_crs = options.get("target_crs") or "EPSG:4326"
     resampling = options.get("resampling", "bilinear")
-    target_resolution = options.get("target_resolution")
+    target_resolution = target_resolution_default
     dst_nodata = options.get("dst_nodata")
     fill_strategy = options.get("fill_strategy", "none")
     fill_value = float(options.get("fill_value", 0.0) or 0.0)

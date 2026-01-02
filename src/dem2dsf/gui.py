@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import shlex
 import shutil
@@ -11,7 +12,9 @@ from pathlib import Path
 from typing import Any
 
 from dem2dsf.build import run_build
+from dem2dsf.dem.info import inspect_dem
 from dem2dsf.dem.stack import load_dem_stack
+from dem2dsf.dem.tiling import tile_bounds
 from dem2dsf.density import DENSITY_PRESETS
 from dem2dsf.presets import get_preset, list_presets
 from dem2dsf.publish import publish_build
@@ -57,6 +60,91 @@ def _invalid_tiles(tiles: list[str]) -> list[str]:
         except ValueError:
             invalid.append(tile)
     return invalid
+
+
+def _resolution_to_meters(info: object) -> float | None:
+    crs = getattr(info, "crs", None)
+    if crs is None:
+        return None
+    res_x, res_y = getattr(info, "resolution", (None, None))
+    if res_x is None or res_y is None:
+        return None
+    if str(crs).upper() in {"EPSG:4326", "EPSG:4258"}:
+        bounds = getattr(info, "bounds", None)
+        if bounds:
+            mid_lat = (bounds[1] + bounds[3]) / 2.0
+            meters_per_deg_lat = 111_320.0
+            meters_per_deg_lon = meters_per_deg_lat * math.cos(math.radians(mid_lat))
+            if meters_per_deg_lon <= 0:
+                meters_per_deg_lon = meters_per_deg_lat
+            return max(res_x * meters_per_deg_lon, res_y * meters_per_deg_lat)
+    return max(res_x, res_y)
+
+
+def _recommend_resolution(dem_paths: list[Path]) -> float | None:
+    resolutions: list[float] = []
+    for path in dem_paths:
+        if not path.exists():
+            continue
+        info = inspect_dem(path)
+        resolution = _resolution_to_meters(info)
+        if resolution is not None:
+            resolutions.append(resolution)
+    return min(resolutions) if resolutions else None
+
+
+def _estimate_triangles(tiles: list[str], resolution_m: float) -> int | None:
+    if resolution_m <= 0:
+        return None
+    total = 0
+    meters_per_deg_lat = 111_320.0
+    for tile in tiles:
+        min_lon, min_lat, max_lon, max_lat = tile_bounds(tile)
+        mid_lat = (min_lat + max_lat) / 2.0
+        meters_per_deg_lon = meters_per_deg_lat * math.cos(math.radians(mid_lat))
+        if meters_per_deg_lon <= 0:
+            meters_per_deg_lon = meters_per_deg_lat
+        width_m = (max_lon - min_lon) * meters_per_deg_lon
+        height_m = (max_lat - min_lat) * meters_per_deg_lat
+        if width_m <= 0 or height_m <= 0:
+            continue
+        cells_x = max(1, int(width_m / resolution_m))
+        cells_y = max(1, int(height_m / resolution_m))
+        total += max(1, cells_x - 1) * max(1, cells_y - 1) * 2
+    return total
+
+
+def _build_warnings(
+    dem_paths: list[Path],
+    tiles: list[str],
+    options: dict[str, Any],
+) -> list[str]:
+    warnings: list[str] = []
+    resolution = options.get("target_resolution")
+    if resolution is None:
+        recommended = _recommend_resolution(dem_paths)
+        if recommended is not None:
+            warnings.append(
+                f"Suggested target resolution ~{recommended:.1f}m based on DEM resolution."
+            )
+            resolution = recommended
+    if resolution is not None and resolution <= 5:
+        warnings.append(
+            f"Target resolution {resolution:.2f}m is very fine; expect high triangle counts."
+        )
+    if resolution is not None and tiles:
+        triangle_estimate = _estimate_triangles(tiles, float(resolution))
+        if triangle_estimate:
+            size_gb = triangle_estimate * 48 / (1024**3)
+            warnings.append(
+                f"Rough mesh estimate: {triangle_estimate/1_000_000:.1f}M triangles "
+                f"(~{size_gb:.1f} GB mesh data)."
+            )
+            if triangle_estimate >= 5_000_000 or size_gb >= 5:
+                warnings.append(
+                    "Large build detected; expect long runtimes and heavy disk usage."
+                )
+    return warnings
 
 
 def default_gui_prefs_path() -> Path:
@@ -545,6 +633,8 @@ def launch_gui() -> None:
                     f"Invalid tile name(s): {', '.join(invalid_tiles)}",
                 )
                 return
+            for warning in _build_warnings(dem_paths, tiles, options):
+                log_message(f"Warning: {warning}")
             run_build(
                 dem_paths=dem_paths,
                 tiles=tiles,

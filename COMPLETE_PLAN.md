@@ -243,7 +243,7 @@ Status legend: planned | in-progress | done. Update the status tags as work land
   - store environment metadata for each perf run
 - Optional: add static typing gates (mypy/pyright) and expand ruff rules (beyond E/F/I).
 
-## Phase 19 — Workflow & UX Improvements (planned)
+## Phase 19 — Workflow & UX Improvements (done)
 - Resume / incremental builds:
   - `--resume` skips tiles already built and validated
   - `--resume validate-only` re-runs checks without rebuilding

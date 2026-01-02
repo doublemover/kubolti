@@ -11,6 +11,7 @@ from typing import Any, Iterable, Mapping
 
 from dem2dsf.autoortho import scan_terrain_textures
 from dem2dsf.backends.base import BuildRequest, BuildResult
+from dem2dsf.build_config import build_config_lock
 from dem2dsf.backends.registry import get_backend
 from dem2dsf.contracts import validate_build_plan, validate_build_report
 from dem2dsf.dem.adapter import profile_for_backend
@@ -48,6 +49,29 @@ def write_json(path: Path, payload: Mapping[str, Any]) -> None:
     """Write a JSON payload to disk, creating parent directories."""
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+
+
+def _load_json(path: Path) -> dict[str, Any] | None:
+    if not path.exists():
+        return None
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(payload, dict):
+        return None
+    return payload
+
+
+def _resume_ok_tiles(report: Mapping[str, Any]) -> set[str]:
+    tiles = set()
+    for tile_entry in report.get("tiles", []):
+        if not isinstance(tile_entry, dict):
+            continue
+        tile = tile_entry.get("tile")
+        if tile and tile_entry.get("status") == "ok":
+            tiles.add(str(tile))
+    return tiles
 
 
 def _normalize_command(value: object) -> list[str] | None:
@@ -351,8 +375,11 @@ def _dem_sanity_findings(info: object) -> list[tuple[str, str]]:
 def _apply_dem_sanity_checks(
     report: dict[str, Any],
     dem_paths: Iterable[Path],
+    *,
+    target_resolution: float | None = None,
 ) -> None:
     findings: list[dict[str, str]] = []
+    infos = []
     for path in dem_paths:
         try:
             info = inspect_dem(path, sample=True)
@@ -365,8 +392,39 @@ def _apply_dem_sanity_checks(
                 }
             )
             continue
+        infos.append(info)
         for code, message in _dem_sanity_findings(info):
             findings.append({"path": str(path), "code": code, "message": message})
+
+    resolutions = [
+        resolution
+        for info in infos
+        if (resolution := _dem_resolution_meters(info)) is not None
+    ]
+    recommended = min(resolutions) if resolutions else None
+    target_value = None
+    if target_resolution is not None:
+        try:
+            target_value = float(target_resolution)
+        except (TypeError, ValueError):
+            target_value = None
+
+    if recommended is not None:
+        report.setdefault("artifacts", {})["resolution_recommendation"] = {
+            "recommended_meters": recommended,
+            "source": "dem_resolution",
+        }
+        if target_value is None:
+            report.setdefault("warnings", []).append(
+                f"Target resolution not set; DEM resolution ~{recommended:.1f}m. "
+                "Use --target-resolution to control triangle density."
+            )
+
+    if target_value is not None and target_value <= 5:
+        report.setdefault("warnings", []).append(
+            f"Target resolution {target_value:.2f}m is very fine; "
+            "expect high triangle counts and long build times."
+        )
 
     if not findings:
         return
@@ -428,7 +486,11 @@ def _apply_coverage_thresholds(
             continue
         if metrics.coverage_before >= min_coverage:
             continue
-        message = f"coverage_before {metrics.coverage_before:.2%} below {min_coverage:.2%}"
+        message = (
+            f"coverage_before {metrics.coverage_before:.2%} below {min_coverage:.2%}; "
+            "expect voids or flattening. Consider a smaller AOI, adding a fallback DEM, "
+            "or relaxing the target resolution."
+        )
         _record_issue(
             tile_entry,
             code="coverage_below_min",
@@ -1098,6 +1160,106 @@ def _attach_performance(
     return report
 
 
+def _finalize_result(
+    result: BuildResult,
+    *,
+    perf: PerfTracker,
+    output_dir: Path,
+    options: Mapping[str, Any],
+) -> BuildResult:
+    if result is None:  # pragma: no cover - defensive guard
+        raise RuntimeError("Build did not produce a report.")
+
+    report = _attach_performance(dict(result.build_report), perf, output_dir, options)
+    inputs = result.build_plan.get("inputs") if result.build_plan else None
+    if inputs:
+        report = {**report, "inputs": inputs}
+    result = BuildResult(build_plan=result.build_plan, build_report=report)
+    bundle_path = None
+    if options.get("bundle_diagnostics"):
+        bundle_path = default_bundle_path(output_dir)
+        report_artifacts = dict(result.build_report.get("artifacts", {}))
+        report_artifacts["diagnostics_bundle"] = str(bundle_path)
+        report_with_bundle = {**result.build_report, "artifacts": report_artifacts}
+        result = BuildResult(build_plan=result.build_plan, build_report=report_with_bundle)
+    validate_build_plan(result.build_plan)
+    validate_build_report(result.build_report)
+    write_json(output_dir / "build_plan.json", result.build_plan)
+    write_json(output_dir / "build_report.json", result.build_report)
+    if bundle_path is not None:
+        try:
+            bundle_diagnostics(output_dir, output_path=bundle_path)
+        except FileNotFoundError:
+            pass
+    return result
+
+
+def _resume_validation(
+    *,
+    dem_paths: list[Path],
+    tiles: list[str],
+    backend_spec: object,
+    output_dir: Path,
+    options: Mapping[str, Any],
+    perf: PerfTracker,
+) -> BuildResult:
+    previous_report = _load_json(output_dir / "build_report.json")
+    if previous_report is None:
+        raise ValueError("resume validation-only requires an existing build_report.json")
+    previous_plan = _load_json(output_dir / "build_plan.json") or {}
+
+    if not tiles:
+        tiles = [
+            entry.get("tile")
+            for entry in previous_report.get("tiles", [])
+            if isinstance(entry, dict) and entry.get("tile")
+        ]
+    tiles = [tile for tile in tiles if tile]
+    if not tiles:
+        raise ValueError("resume validation-only requires tiles in build_report.json")
+
+    if not dem_paths:
+        dem_inputs = previous_plan.get("inputs", {}).get("dems", [])
+        dem_paths = [Path(path) for path in dem_inputs if path]
+    if not dem_paths:
+        raise ValueError("resume validation-only requires DEM inputs from build_plan.json")
+
+    plan = build_plan(
+        backend=backend_spec,
+        tiles=tiles,
+        dem_paths=[str(p) for p in dem_paths],
+        options=options,
+        aoi=options.get("aoi"),
+    )
+    tile_statuses = [
+        {"tile": tile, "status": "ok", "messages": ["resume validation-only"]}
+        for tile in tiles
+    ]
+    report = build_report(
+        backend=backend_spec,
+        tile_statuses=tile_statuses,
+        artifacts={"scenery_dir": str(output_dir), "resume_mode": "validate-only"},
+        warnings=[],
+        errors=[],
+    )
+    result = BuildResult(build_plan=plan, build_report=report)
+
+    validation_options = dict(options)
+    validation_options["validate_all"] = True
+
+    with perf.span("xp12_checks"):
+        if getattr(backend_spec, "supports_xp12_rasters", False):
+            _apply_xp12_checks(result.build_report, validation_options, output_dir)
+    with perf.span("autoortho_checks"):
+        _apply_autoortho_checks(result.build_report, validation_options, output_dir)
+    with perf.span("dds_validation"):
+        _apply_dds_validation(result.build_report, validation_options, output_dir)
+    with perf.span("dsf_validation"):
+        _apply_dsf_validation(result.build_report, validation_options, output_dir)
+
+    return _finalize_result(result, perf=perf, output_dir=output_dir, options=options)
+
+
 def run_build(
     *,
     dem_paths: list[Path],
@@ -1120,13 +1282,50 @@ def run_build(
             **options,
             "dem_stack": stack_to_options(stack),
         }
-    _validate_build_inputs(tiles=tiles, dem_paths=dem_paths, options=options)
     requested_tiles = list(tiles)
+    lock_inputs = {
+        "dems": [str(path) for path in dem_paths],
+        "dem_stack": stack_path,
+        "tiles": requested_tiles,
+        "aoi": options.get("aoi"),
+        "aoi_crs": options.get("aoi_crs"),
+    }
+    lock_tools = {
+        "runner": _resolve_tool_command(options.get("runner")),
+        "dsftool": _resolve_tool_command(options.get("dsftool")),
+        "ddstool": _resolve_tool_command(options.get("ddstool")),
+    }
+    lock_payload = build_config_lock(
+        inputs=lock_inputs,
+        options=options,
+        tools={key: value for key, value in lock_tools.items() if value},
+        output_dir=output_dir,
+    )
+    write_json(output_dir / "build_config.lock.json", lock_payload)
+
+    resume_mode = options.get("resume")
+    if resume_mode == "validate-only":
+        return _resume_validation(
+            dem_paths=dem_paths,
+            tiles=requested_tiles,
+            backend_spec=backend_spec,
+            output_dir=output_dir,
+            options=options,
+            perf=perf,
+        )
+    resume_skip: set[str] = set()
+    if resume_mode:
+        resume_report = _load_json(output_dir / "build_report.json")
+        if resume_report is None:
+            raise ValueError("resume requires an existing build_report.json")
+        resume_skip = _resume_ok_tiles(resume_report)
+
+    _validate_build_inputs(tiles=requested_tiles, dem_paths=dem_paths, options=options)
     normalization_errors: dict[str, str] = {}
     coverage_min = options.get("coverage_min")
-    tiles_for_backend = tiles
+    tiles_for_backend = [tile for tile in requested_tiles if tile not in resume_skip]
     request = BuildRequest(
-        tiles=tuple(tiles),
+        tiles=tuple(tiles_for_backend),
         dem_paths=tuple(dem_paths),
         output_dir=output_dir,
         options=options,
@@ -1135,7 +1334,36 @@ def run_build(
     result: BuildResult | None = None
     coverage_metrics: Mapping[str, Any] = {}
     try:
-        if options.get("dry_run"):
+        if resume_skip and not tiles_for_backend:
+            plan = build_plan(
+                backend=backend_spec,
+                tiles=requested_tiles,
+                dem_paths=[str(p) for p in dem_paths],
+                options=options,
+                aoi=options.get("aoi"),
+            )
+            tile_statuses = [
+                {
+                    "tile": tile,
+                    "status": "skipped",
+                    "messages": ["resume: previously reported ok"],
+                }
+                for tile in requested_tiles
+            ]
+            report = build_report(
+                backend=backend_spec,
+                tile_statuses=tile_statuses,
+                artifacts={
+                    "scenery_dir": str(output_dir),
+                    "resume_skipped": sorted(resume_skip),
+                },
+                warnings=[
+                    f"Resume skipped {len(resume_skip)} tile(s) with ok status."
+                ],
+                errors=[],
+            )
+            result = BuildResult(build_plan=plan, build_report=report)
+        elif options.get("dry_run"):
             plan = build_plan(
                 backend=backend_spec,
                 tiles=tiles,
@@ -1157,7 +1385,7 @@ def run_build(
             if options.get("normalize", True):
                 backend_profile = profile_for_backend(backend_name)
                 target_crs = options.get("target_crs") or backend_spec.tile_dem_crs
-                resolution = _resolution_from_options(options, tiles, target_crs)
+                resolution = _resolution_from_options(options, tiles_for_backend, target_crs)
                 fill_strategy = options.get("fill_strategy", "none")
                 fill_value = float(options.get("fill_value", 0.0) or 0.0)
                 fallback_dem_paths = [
@@ -1189,9 +1417,8 @@ def run_build(
                     sources=dem_paths,
                     fallback_sources=fallback_sources,
                     options=cache_options,
-                    tiles=tiles,
+                    tiles=tiles_for_backend,
                 )
-                tiles_for_backend = tiles
                 with perf.span("normalize"):
                     if cache_hit and normalization_cache is not None:
                         coverage_metrics = (
@@ -1206,7 +1433,7 @@ def run_build(
                         if stack:
                             normalization = normalize_stack_for_tiles(
                                 stack,
-                                tiles,
+                                tiles_for_backend,
                                 output_dir / "normalized",
                                 target_crs=target_crs,
                                 resampling=options.get("resampling", "bilinear"),
@@ -1226,7 +1453,7 @@ def run_build(
                         else:
                             normalization = normalize_for_tiles(
                                 dem_paths,
-                                tiles,
+                                tiles_for_backend,
                                 output_dir / "normalized",
                                 target_crs=target_crs,
                                 resampling=options.get("resampling", "bilinear"),
@@ -1246,7 +1473,7 @@ def run_build(
                         normalization_errors = dict(normalization.errors)
                         if normalization_errors:
                             tiles_for_backend = [
-                                tile for tile in tiles if tile not in normalization_errors
+                                tile for tile in tiles_for_backend if tile not in normalization_errors
                             ]
                         coverage_metrics = (
                             normalization.coverage if coverage_metrics_enabled else {}
@@ -1256,7 +1483,7 @@ def run_build(
                                 normalization,
                                 options=cache_options,
                                 fallback_sources=fallback_sources,
-                                tiles=tiles,
+                                tiles=tiles_for_backend,
                             )
                             write_normalization_cache(output_dir / "normalized", cache)
                         options = {
@@ -1312,7 +1539,11 @@ def run_build(
                     "errors": list(result.build_report.get("errors", [])),
                 }
                 with perf.span("dem_sanity"):
-                    _apply_dem_sanity_checks(report, dem_paths)
+                    _apply_dem_sanity_checks(
+                        report,
+                        dem_paths,
+                        target_resolution=options.get("target_resolution"),
+                    )
                 with perf.span("triangle_guardrails"):
                     _apply_triangle_guardrails(report, options)
                 if backend_spec.supports_xp12_rasters:
@@ -1345,33 +1576,22 @@ def run_build(
                             }
                         )
                         report.setdefault("errors", []).append(f"{tile}: normalization failed")
+                if resume_skip:
+                    for tile in sorted(resume_skip):
+                        report["tiles"].append(
+                            {
+                                "tile": tile,
+                                "status": "skipped",
+                                "messages": ["resume: previously reported ok"],
+                            }
+                        )
+                    report.setdefault("warnings", []).append(
+                        f"Resume skipped {len(resume_skip)} tile(s) with ok status."
+                    )
+                    report.setdefault("artifacts", {})["resume_skipped"] = sorted(resume_skip)
                 result = BuildResult(build_plan=result.build_plan, build_report=report)
         perf.stop()
     finally:
         perf.stop()
 
-    if result is None:  # pragma: no cover - defensive guard
-        raise RuntimeError("Build did not produce a report.")
-
-    report = _attach_performance(dict(result.build_report), perf, output_dir, options)
-    inputs = result.build_plan.get("inputs") if result.build_plan else None
-    if inputs:
-        report = {**report, "inputs": inputs}
-    result = BuildResult(build_plan=result.build_plan, build_report=report)
-    bundle_path = None
-    if options.get("bundle_diagnostics"):
-        bundle_path = default_bundle_path(output_dir)
-        report_artifacts = dict(result.build_report.get("artifacts", {}))
-        report_artifacts["diagnostics_bundle"] = str(bundle_path)
-        report_with_bundle = {**result.build_report, "artifacts": report_artifacts}
-        result = BuildResult(build_plan=result.build_plan, build_report=report_with_bundle)
-    validate_build_plan(result.build_plan)
-    validate_build_report(result.build_report)
-    write_json(output_dir / "build_plan.json", result.build_plan)
-    write_json(output_dir / "build_report.json", result.build_report)
-    if bundle_path is not None:
-        try:
-            bundle_diagnostics(output_dir, output_path=bundle_path)
-        except FileNotFoundError:
-            pass
-    return result
+    return _finalize_result(result, perf=perf, output_dir=output_dir, options=options)

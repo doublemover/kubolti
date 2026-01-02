@@ -27,3 +27,9 @@ def validate_build_report(report: Mapping[str, Any]) -> None:
     """Validate a build report against the schema."""
     schema = _load_schema("build_report.schema.json")
     jsonschema.validate(report, schema)
+
+
+def validate_build_config(config: Mapping[str, Any]) -> None:
+    """Validate a build config against the schema."""
+    schema = _load_schema("build_config.schema.json")
+    jsonschema.validate(config, schema)

@@ -37,6 +37,7 @@ pipx install .
 - `docs/compatibility.md` for supported platforms and tool version policy.
 - `docs/Ortho4XP/README.md` for Ortho4XP workflow notes and automation checks.
 - `docs/DSFTool/README.md` for DSFTool usage and gotchas.
+- `docs/build_config.md` and `docs/output_layout.md` for config files and build output layout.
 - `docs/presets.md`, `docs/dem_stack.md`, and `docs/patch_workflow.md` for
   presets, DEM stacks, and patch workflows.
 - `docs/quickstarts/` for platform-specific setup steps.
@@ -54,6 +55,7 @@ pipx install .
 - AutoOrtho compatibility checks for texture references.
 - Publish packaging with optional DSF 7-Zip compression and backups.
 - Overlay generation, patch workflows, Custom Scenery scans, and cache tools.
+- Config-driven builds, resume/validate-only runs, and clean command for cached artifacts.
 - Tkinter GUI for build and publish with persisted preferences.
 
 ## Roadmap highlights
@@ -94,7 +96,8 @@ Tip: after install you can run either `dem2dsf ...` or `python -m dem2dsf ...`.
 dem2dsf build --dem dem.tif --tile +47+008 --output build
 ```
 
-Build outputs include `build/build_plan.json` and `build/build_report.json`.
+Build outputs include `build/build_plan.json`, `build/build_report.json`, and
+`build/build_config.lock.json`.
 Use `--tile-jobs 4` to parallelize per-tile normalization work.
 
 Infer tiles (explicit opt-in) and apply an AOI mask:
@@ -105,6 +108,25 @@ dem2dsf build --dem dem.tif --infer-tiles --aoi area.geojson --output build
 
 Use `--aoi-crs EPSG:4326` if your AOI lacks embedded CRS metadata. WGS84 is the
 preferred CRS.
+
+### Config-driven builds
+
+```bash
+dem2dsf build --config build.json --output build
+```
+
+The config file can provide `inputs`, `options`, and `tools` overrides. CLI
+flags take precedence over config values.
+
+### Resume builds
+
+```bash
+dem2dsf build --output build --resume
+dem2dsf build --output build --resume validate-only
+```
+
+`--resume` skips tiles already marked `ok` in `build_report.json`. Use
+`validate-only` to rerun validations without rebuilding.
 
 ### Infer tiles
 
@@ -188,6 +210,13 @@ dem2dsf scan --scenery-root "X-Plane 12/Custom Scenery"
 
 dem2dsf cache list --ortho-root "C:/Ortho4XP" --tile +47+008
 dem2dsf cache purge --ortho-root "C:/Ortho4XP" --tile +47+008 --confirm
+```
+
+### Clean build artifacts
+
+```bash
+dem2dsf clean --build-dir build
+dem2dsf clean --build-dir build --include normalized --include runner-logs --confirm
 ```
 
 ### Presets

@@ -40,6 +40,21 @@ def test_invalid_tiles() -> None:
     assert gui._invalid_tiles(["47+008", "+47+08"]) == ["47+008", "+47+08"]
 
 
+def test_build_warnings_suggests_resolution(monkeypatch, tmp_path: Path) -> None:
+    dem_path = tmp_path / "dem.tif"
+    dem_path.write_text("stub", encoding="utf-8")
+    info = SimpleNamespace(
+        crs="EPSG:4326",
+        resolution=(0.0001, 0.0001),
+        bounds=(0.0, 0.0, 1.0, 1.0),
+    )
+    monkeypatch.setattr(gui, "inspect_dem", lambda *_: info)
+
+    warnings = gui._build_warnings([dem_path], ["+00+000"], {"target_resolution": None})
+
+    assert any("Suggested target resolution" in warning for warning in warnings)
+
+
 def test_gui_prefs_roundtrip(tmp_path: Path, monkeypatch) -> None:
     prefs_path = tmp_path / "prefs.json"
     monkeypatch.setenv(gui.ENV_GUI_PREFS, str(prefs_path))

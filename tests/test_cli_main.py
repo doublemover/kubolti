@@ -81,6 +81,41 @@ def test_cli_build_infers_tiles(monkeypatch) -> None:
     assert captured["tiles"] == ["+47+008"]
 
 
+def test_cli_build_with_config(monkeypatch, tmp_path: Path) -> None:
+    config_path = tmp_path / "config.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "inputs": {"dems": ["dem.tif"], "tiles": ["+47+008"]},
+                "options": {"dry_run": True},
+            }
+        ),
+        encoding="utf-8",
+    )
+    captured = {}
+
+    def fake_run_build(**kwargs):
+        captured.update(kwargs)
+        return BuildResult(build_plan={}, build_report={"errors": []})
+
+    monkeypatch.setattr(cli, "run_build", fake_run_build)
+
+    result = cli.main(["build", "--config", str(config_path), "--output", str(tmp_path)])
+    assert result == 0
+    assert captured["tiles"] == ["+47+008"]
+    assert captured["dem_paths"][0].name == "dem.tif"
+
+
+def test_cli_clean_dry_run(tmp_path: Path) -> None:
+    build_dir = tmp_path / "build"
+    (build_dir / "normalized").mkdir(parents=True)
+
+    result = cli.main(["clean", "--build-dir", str(build_dir)])
+
+    assert result == 0
+    assert (build_dir / "normalized").exists()
+
+
 def test_cli_build_profile_options(monkeypatch) -> None:
     captured = {}
 

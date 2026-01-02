@@ -8,9 +8,11 @@ Key docs:
 - `backend_contract.md` defines the backend interface and artifact expectations.
 - `pinned_versions.md` tracks toolchain versions targeted by the project.
 - `dem_stack.md` documents multi-resolution DEM stack inputs.
+- `build_config.md` documents build config JSON files.
 - `patch_workflow.md` describes patch plans and patch CLI usage.
 - `overlay_plugins.md` covers drape overlays and plugin generators.
 - `presets.md` summarizes the built-in preset library.
+- `output_layout.md` describes build output folders and cleanup targets.
 - `gui.md` documents the Tkinter launcher.
 - `Ortho4XP/README.md` and companions capture Ortho4XP workflow + automation notes.
 - `release_signing.md` outlines release packaging and signing.
