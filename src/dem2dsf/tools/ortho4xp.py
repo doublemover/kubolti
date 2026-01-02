@@ -153,6 +153,7 @@ def build_command(
 
 
 def _script_supports_flag_args(script_path: Path) -> bool:
+    """Return True if the script appears to support flag-style args."""
     try:
         content = script_path.read_text(encoding="utf-8", errors="ignore")
     except OSError:

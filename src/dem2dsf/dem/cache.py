@@ -58,6 +58,7 @@ class SourceFingerprint:
         *,
         compute_sha256: bool = False,
     ) -> "SourceFingerprint":
+        """Build a fingerprint from an on-disk file path."""
         resolved = path.resolve()
         stat = resolved.stat()
         digest = _sha256_path(resolved) if compute_sha256 else None
@@ -70,6 +71,7 @@ class SourceFingerprint:
 
     @classmethod
     def from_dict(cls, data: Mapping[str, Any]) -> "SourceFingerprint":
+        """Deserialize a fingerprint from a JSON mapping."""
         return cls(
             path=str(data["path"]),
             size=int(data["size"]),
@@ -78,6 +80,7 @@ class SourceFingerprint:
         )
 
     def to_dict(self) -> dict[str, Any]:
+        """Serialize the fingerprint for JSON output."""
         payload = asdict(self)
         if self.sha256 is None:
             payload.pop("sha256", None)
@@ -218,6 +221,7 @@ class NormalizationCache:
         return _fingerprints_match(current, self.mosaic_fingerprint, validate_hashes=True)
 
     def to_dict(self) -> dict[str, Any]:
+        """Serialize the cache into a JSON-friendly mapping."""
         return {
             "version": self.version,
             "sources": [item.to_dict() for item in self.sources],
@@ -237,6 +241,7 @@ class NormalizationCache:
 
     @classmethod
     def from_dict(cls, data: Mapping[str, Any]) -> "NormalizationCache":
+        """Load a cache instance from a JSON mapping."""
         sources = tuple(SourceFingerprint.from_dict(item) for item in data.get("sources", []))
         fallback_sources = tuple(
             SourceFingerprint.from_dict(item) for item in data.get("fallback_sources", [])

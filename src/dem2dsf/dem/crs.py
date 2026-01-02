@@ -20,6 +20,7 @@ def transformer(src: str | CRS, dst: str | CRS) -> Transformer:
 
 
 def _linspace(start: float, stop: float, count: int) -> list[float]:
+    """Return evenly spaced values between start and stop inclusive."""
     if count <= 1:
         return [start]
     step = (stop - start) / (count - 1)

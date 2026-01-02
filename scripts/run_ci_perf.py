@@ -10,6 +10,7 @@ import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import cast
 
 import numpy as np
 import rasterio
@@ -180,6 +181,11 @@ def main() -> int:
         help="Fail if percent regression exceeds this threshold.",
     )
     parser.add_argument(
+        "--warn-only",
+        action="store_true",
+        help="Emit warnings instead of failing on threshold regressions.",
+    )
+    parser.add_argument(
         "--write-baseline",
         action="store_true",
         help="Write the current summary to the baseline path.",
@@ -236,7 +242,10 @@ def main() -> int:
         "normalize_max_seconds": args.normalize_max_seconds,
         "publish_max_seconds": args.publish_max_seconds,
         "python_version": platform.python_version(),
+        "python_implementation": platform.python_implementation(),
         "platform": platform.platform(),
+        "machine": platform.machine(),
+        "processor": platform.processor(),
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }
     summary_path = output_dir / "summary.json"
@@ -255,7 +264,7 @@ def main() -> int:
             trend = _write_trend(output_dir, summary, baseline_path, baseline)
             max_regression = args.baseline_max_regression_pct
             if max_regression is not None:
-                deltas = trend["delta_percent"]
+                deltas = cast(dict[str, float | None], trend["delta_percent"])
                 for key, delta in deltas.items():
                     if delta is None:
                         continue
@@ -268,10 +277,12 @@ def main() -> int:
         baseline_path.write_text(json.dumps(summary, indent=2), encoding="utf-8")
 
     if failures:
-        print("Perf thresholds exceeded:")
+        header = "Perf warnings (non-fatal):" if args.warn_only else "Perf thresholds exceeded:"
+        print(header)
         for failure in failures:
             print(f"- {failure}")
-        return 1
+        if not args.warn_only:
+            return 1
 
     print("Perf summary:")
     print(json.dumps(summary, indent=2))

@@ -88,6 +88,7 @@ def _run_tile_jobs(
     *,
     continue_on_error: bool,
 ) -> list[TileWorkResult]:
+    """Run per-tile workers serially or via a thread pool."""
     results: dict[str, TileWorkResult] = {}
     if tile_jobs == 1 or len(tiles) <= 1:
         for tile in tiles:
@@ -340,6 +341,8 @@ def normalize_for_tiles(
             compression=compression,
         )
     else:
+        if not warped_paths:
+            raise ValueError("No DEM sources available after warping.")
         mosaic_path = warped_paths[0]
 
     fallback_paths: tuple[Path, ...] = tuple(fallback_dem_paths or [])
@@ -375,6 +378,7 @@ def normalize_for_tiles(
     coverage: dict[str, CoverageMetrics] = {}
 
     def process_tile(tile: str) -> tuple[TileResult, CoverageMetrics]:
+        """Normalize a single tile and return coverage metrics."""
         start_time = perf_counter()
         output_path = tile_dir / tile / f"{tile}.tif"
         if mosaic_strategy == "per-tile" and len(primary_sources) > 1:
@@ -430,8 +434,11 @@ def normalize_for_tiles(
                         compression=compression,
                     )
                 else:
+                    if not fallback_sources:
+                        raise ValueError("Fallback sources missing for fill.")
+                    fallback_first = next(iter(fallback_sources))
                     write_tile_dem(
-                        fallback_sources[0],
+                        fallback_first,
                         tile,
                         fallback_tile,
                         resolution=resolution,
@@ -602,6 +609,7 @@ def normalize_stack_for_tiles(
     coverage: dict[str, CoverageMetrics] = {}
 
     def process_tile(tile: str) -> tuple[TileResult, CoverageMetrics]:
+        """Normalize a stack tile and return coverage metrics."""
         start_time = perf_counter()
         layer_tile_paths: list[Path] = []
         tile_result: TileResult | None = None
@@ -670,8 +678,11 @@ def normalize_stack_for_tiles(
                         compression=compression,
                     )
                 else:
+                    if not fallback_sources:
+                        raise ValueError("Fallback sources missing for fill.")
+                    fallback_first = next(iter(fallback_sources))
                     write_tile_dem(
-                        fallback_sources[0],
+                        fallback_first,
                         tile,
                         fallback_tile,
                         resolution=resolution,

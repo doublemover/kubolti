@@ -115,6 +115,7 @@ def dsf_is_7z(path: Path) -> bool:
 
 
 def dsftool_7z_hint(tool_cmd: Sequence[str] | Path | str, dsf_path: Path) -> str | None:
+    """Return a hint if DSFTool version may not handle 7z-compressed DSFs."""
     if not dsf_is_7z(dsf_path):
         return None
     version = dsftool_version(tool_cmd)

@@ -126,7 +126,9 @@ def _extract_raster_blocks(text: str) -> dict[str, RasterBlock]:
                 continue
             block = blocks.get(index)
             if block:
-                block["lines"].append(raw_line)
+                lines = block.get("lines")
+                if isinstance(lines, list):
+                    lines.append(raw_line)
     results: dict[str, RasterBlock] = {}
     for index in ordered:
         block = blocks.get(index)

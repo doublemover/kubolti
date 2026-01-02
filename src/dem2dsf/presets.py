@@ -131,13 +131,17 @@ def _preset_from_mapping(data: Mapping[str, Any]) -> Preset | None:
         return None
     inputs = _coerce_str_list(data.get("inputs"))
     notes = _coerce_str_list(data.get("notes"))
-    options = data.get("options") if isinstance(data.get("options"), Mapping) else {}
-    example = data.get("example") if isinstance(data.get("example"), str) else ""
+    raw_options = data.get("options")
+    options: dict[str, Any] = {}
+    if isinstance(raw_options, Mapping):
+        options = {str(key): value for key, value in raw_options.items()}
+    example_value = data.get("example")
+    example = example_value if isinstance(example_value, str) else ""
     return Preset(
         name=name.strip().lower(),
         summary=summary.strip(),
         inputs=inputs,
-        options=dict(options),
+        options=options,
         notes=notes,
         example=example,
     )

@@ -6,6 +6,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 import rasterio
+from rasterio.transform import from_bounds
 
 from dem2dsf.patch import (
     _apply_aoi_mask,
@@ -146,6 +147,111 @@ def test_run_patch_dry_run(tmp_path: Path) -> None:
     assert (output_dir / "build_plan.json").exists()
 
 
+def test_run_patch_preserves_multi_dem_inputs(monkeypatch, tmp_path: Path) -> None:
+    build_dir = tmp_path / "build"
+    build_dir.mkdir()
+    base_tile = build_dir / "normalized" / "tiles" / "+47+008" / "+47+008.tif"
+    write_raster(
+        base_tile,
+        np.array([[1]], dtype=np.int16),
+        bounds=(8.0, 47.0, 9.0, 48.0),
+        nodata=-9999,
+    )
+    build_plan = {
+        "schema_version": "1",
+        "backend": {"name": "ortho4xp"},
+        "inputs": {"dems": ["dem_a.tif", "dem_b.tif"]},
+        "options": {"tile_dem_paths": {"+47+008": str(base_tile)}},
+    }
+    (build_dir / "build_plan.json").write_text(json.dumps(build_plan), encoding="utf-8")
+
+    patch_plan = tmp_path / "patch.json"
+    patch_dem = tmp_path / "patch_dem.tif"
+    write_raster(
+        patch_dem,
+        np.array([[2]], dtype=np.int16),
+        bounds=(8.0, 47.0, 9.0, 48.0),
+        nodata=-9999,
+    )
+    patch_plan.write_text(
+        json.dumps({"patches": [{"tile": "+47+008", "dem": str(patch_dem)}]}),
+        encoding="utf-8",
+    )
+
+    captured = {}
+
+    def fake_run_build(*, dem_paths, options, **_kwargs):
+        captured["dem_paths"] = dem_paths
+        captured["options"] = options
+
+    monkeypatch.setattr("dem2dsf.patch.run_build", fake_run_build)
+
+    report = run_patch(
+        build_dir=build_dir,
+        patch_plan_path=patch_plan,
+        dry_run=True,
+    )
+
+    output_dir = Path(report["output_dir"])
+    patched_tile = output_dir / "normalized" / "tiles" / "+47+008" / "+47+008.tif"
+    assert captured["dem_paths"] == [Path("dem_a.tif"), Path("dem_b.tif")]
+    assert captured["options"]["tile_dem_paths"]["+47+008"] == str(patched_tile)
+
+
+def test_run_patch_preserves_dem_stack_options(monkeypatch, tmp_path: Path) -> None:
+    build_dir = tmp_path / "build"
+    build_dir.mkdir()
+    base_tile = build_dir / "normalized" / "tiles" / "+47+008" / "+47+008.tif"
+    write_raster(
+        base_tile,
+        np.array([[1]], dtype=np.int16),
+        bounds=(8.0, 47.0, 9.0, 48.0),
+        nodata=-9999,
+    )
+    build_plan = {
+        "schema_version": "1",
+        "backend": {"name": "ortho4xp"},
+        "inputs": {"dems": ["stack_a.tif"]},
+        "options": {
+            "tile_dem_paths": {"+47+008": str(base_tile)},
+            "dem_stack_path": "stack.json",
+            "dem_stack": {
+                "layers": [{"path": "stack_a.tif", "priority": 0, "aoi": None, "nodata": None}]
+            },
+        },
+    }
+    (build_dir / "build_plan.json").write_text(json.dumps(build_plan), encoding="utf-8")
+
+    patch_plan = tmp_path / "patch.json"
+    patch_dem = tmp_path / "patch_dem.tif"
+    write_raster(
+        patch_dem,
+        np.array([[2]], dtype=np.int16),
+        bounds=(8.0, 47.0, 9.0, 48.0),
+        nodata=-9999,
+    )
+    patch_plan.write_text(
+        json.dumps({"patches": [{"tile": "+47+008", "dem": str(patch_dem)}]}),
+        encoding="utf-8",
+    )
+
+    captured = {}
+
+    def fake_run_build(*, options, **_kwargs):
+        captured["options"] = options
+
+    monkeypatch.setattr("dem2dsf.patch.run_build", fake_run_build)
+
+    run_patch(
+        build_dir=build_dir,
+        patch_plan_path=patch_plan,
+        dry_run=True,
+    )
+
+    assert captured["options"]["dem_stack_path"] == "stack.json"
+    assert captured["options"]["dem_stack"]["layers"][0]["path"] == "stack_a.tif"
+
+
 def test_load_patch_plan_requires_entries(tmp_path: Path) -> None:
     plan_path = tmp_path / "patch.json"
     plan_path.write_text(json.dumps({"patches": []}), encoding="utf-8")
@@ -195,7 +301,7 @@ def test_prepare_patch_tile_requires_crs(tmp_path: Path) -> None:
     write_raster(base_tile, data, bounds=(8.0, 47.0, 9.0, 48.0))
 
     patch_dem = tmp_path / "patch.tif"
-    transform = rasterio.transform.from_bounds(8.0, 47.0, 9.0, 48.0, 1, 1)
+    transform = from_bounds(8.0, 47.0, 9.0, 48.0, 1, 1)
     with rasterio.open(
         patch_dem,
         "w",

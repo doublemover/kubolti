@@ -191,6 +191,7 @@ def _normalize_runner(value: object) -> list[str] | None:
 
 
 def _runner_log_paths(output_dir: Path, tile: str, attempt: int) -> tuple[Path, Path]:
+    """Return stdout/stderr log paths for a runner invocation."""
     log_dir = output_dir / "runner_logs"
     log_dir.mkdir(parents=True, exist_ok=True)
     suffix = "" if attempt <= 1 else f".attempt{attempt}"
@@ -200,6 +201,7 @@ def _runner_log_paths(output_dir: Path, tile: str, attempt: int) -> tuple[Path, 
 
 
 def _read_stage_metadata(output_dir: Path, tile: str) -> str | None:
+    """Load staged DEM metadata from the runner logs if present."""
     path = output_dir / "runner_logs" / f"ortho4xp_{tile}.staged.json"
     if not path.exists():
         return None
@@ -276,6 +278,7 @@ def _runner_supports_autoortho(runner: list[str]) -> bool:
 
 
 def _runner_flag_present(runner: list[str], flag: str) -> bool:
+    """Return True when a runner command already includes a flag."""
     for token in runner:
         if token == flag or token.startswith(f"{flag}="):
             return True
@@ -283,6 +286,7 @@ def _runner_flag_present(runner: list[str], flag: str) -> bool:
 
 
 def _validate_runner(runner: list[str]) -> str | None:
+    """Validate runner command configuration and return an error message."""
     binary = runner[0] if runner else ""
     if not binary:
         return "Runner command is empty."

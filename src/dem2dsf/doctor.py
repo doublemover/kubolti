@@ -8,7 +8,7 @@ import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable
+from typing import Iterable, Sequence
 
 from dem2dsf.scenery import validate_overlay_source
 from dem2dsf.tools.config import load_tool_paths, ortho_root_from_paths
@@ -68,8 +68,18 @@ def check_python_deps() -> Iterable[CheckResult]:
     return results
 
 
-def check_command(name: str, command: list[str] | None) -> CheckResult:
+def _normalize_command(command: Sequence[str] | str | None) -> list[str] | None:
+    """Normalize a command input into a list of strings."""
+    if command is None:
+        return None
+    if isinstance(command, str):
+        return [command]
+    return [str(item) for item in command]
+
+
+def check_command(name: str, command: Sequence[str] | str | None) -> CheckResult:
     """Probe an external command for availability and basic responsiveness."""
+    command = _normalize_command(command)
     if not command:
         return _status(name, "warn", "not configured")
     binary = command[0]
@@ -90,6 +100,7 @@ def check_command(name: str, command: list[str] | None) -> CheckResult:
 
 
 def _runner_flag_value(runner: list[str] | None, flag: str) -> str | None:
+    """Return the value for a runner flag if present."""
     if not runner:
         return None
     for index, token in enumerate(runner):
@@ -104,6 +115,7 @@ def _resolve_ortho_root(
     ortho_runner: list[str] | None,
     tool_paths: dict[str, Path],
 ) -> Path | None:
+    """Resolve the Ortho4XP root from runner flags, tool paths, or env."""
     root_override = _runner_flag_value(ortho_runner, "--ortho-root")
     if root_override:
         return Path(root_override).expanduser()
@@ -225,7 +237,7 @@ def check_overlay_source(
 def run_doctor(
     *,
     ortho_runner: list[str] | None,
-    dsftool_path: list[str] | None,
+    dsftool_path: Sequence[str] | str | None,
 ) -> list[CheckResult]:
     """Run all environment checks and return the aggregated results."""
     tool_paths = load_tool_paths()

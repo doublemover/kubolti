@@ -193,6 +193,7 @@ def test_enrich_dsf_rasters_success(monkeypatch, tmp_path: Path) -> None:
         tmp_path / "work",
     )
     assert result.status == "enriched"
+    assert result.backup_path is not None
     assert Path(result.backup_path).exists()
 
 

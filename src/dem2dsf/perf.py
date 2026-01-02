@@ -23,6 +23,7 @@ class PerfTracker:
     """Capture timing spans and optional memory peaks."""
 
     def __init__(self, *, enabled: bool, track_memory: bool = True) -> None:
+        """Initialize a performance tracker for a build or benchmark."""
         self.enabled = enabled
         self.track_memory = track_memory
         self._spans: list[PerfSpan] = []

@@ -3,6 +3,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 import rasterio
+from rasterio.transform import from_bounds
 
 from dem2dsf.dem.adapter import (
     ORTHO4XP_PROFILE,
@@ -36,7 +37,7 @@ def test_apply_backend_profile_requires_crs(tmp_path) -> None:
         width=1,
         count=1,
         dtype=data.dtype,
-        transform=rasterio.transform.from_bounds(0.0, 0.0, 1.0, 1.0, 1, 1),
+        transform=from_bounds(0.0, 0.0, 1.0, 1.0, 1, 1),
     ) as dataset:
         dataset.write(data, 1)
 

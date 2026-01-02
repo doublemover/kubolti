@@ -39,6 +39,7 @@ class OverlayGenerator(Protocol):
     name: str
 
     def generate(self, request: OverlayRequest) -> OverlayResult:
+        """Generate overlay artifacts for a build request."""
         raise NotImplementedError
 
 
@@ -46,6 +47,7 @@ class OverlayRegistry:
     """Registry for overlay generators."""
 
     def __init__(self) -> None:
+        """Initialize an empty overlay generator registry."""
         self._generators: dict[str, OverlayGenerator] = {}
 
     def register(self, generator: OverlayGenerator) -> None:

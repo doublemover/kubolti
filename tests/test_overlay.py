@@ -57,7 +57,7 @@ def test_overlay_generator_protocol() -> None:
         options={},
     )
     with pytest.raises(NotImplementedError):
-        OverlayGenerator.generate(None, request)
+        OverlayGenerator.generate(None, request)  # type: ignore[reportAbstractUsage,reportArgumentType]
 
 
 def test_apply_drape_texture(tmp_path: Path) -> None:

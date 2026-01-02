@@ -204,7 +204,7 @@ Status legend: planned | in-progress | done. Update the status tags as work land
   - document archive/tool download trust assumptions
   - ensure archive extraction remains safe (even under future refactors)
 
-## Phase 18 — DX, CI, and Integration Hardening (planned)
+## Phase 18 — DX, CI, and Integration Hardening (done)
 - Expand CI:
   - separate unit vs e2e vs integration jobs
   - optional self-hosted integration job with Ortho4XP/XPTools available

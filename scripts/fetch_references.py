@@ -13,7 +13,7 @@ from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 from playwright.sync_api import sync_playwright
 
 try:
-    from playwright_stealth import stealth_sync
+    from playwright_stealth import stealth_sync  # type: ignore[reportAttributeAccessIssue]
 except ImportError:
     stealth_sync = None
 

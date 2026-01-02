@@ -84,6 +84,7 @@ class BuildOptions:
     metrics_json: str | None
 
     def as_dict(self) -> dict[str, object]:
+        """Return options as a JSON-serializable mapping."""
         return {
             "quality": self.quality,
             "autoortho": self.autoortho,

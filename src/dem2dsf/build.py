@@ -707,11 +707,12 @@ def _apply_dsf_validation(
         text_path = work_dir / f"{dsf_path.stem}.txt"
         rebuilt_path = work_dir / dsf_path.name
         metrics = _ensure_metrics(tile_entry)
-        metrics["dsf_validation"] = {
+        validation_metrics: dict[str, object] = {
             "roundtrip": "pending",
             "text_path": str(text_path),
             "rebuilt_path": str(rebuilt_path),
         }
+        metrics["dsf_validation"] = validation_metrics
         try:
             roundtrip_dsf(
                 dsftool_cmd,
@@ -721,26 +722,26 @@ def _apply_dsf_validation(
             )
         except RuntimeError as exc:
             message = str(exc)
-            metrics["dsf_validation"]["roundtrip"] = "failed"
-            metrics["dsf_validation"]["error"] = message
+            validation_metrics["roundtrip"] = "failed"
+            validation_metrics["error"] = message
             _ensure_messages(tile_entry).append(message)
             _mark_error(tile_entry)
             report.setdefault("errors", []).append(f"{tile}: {message}")
             continue
-        metrics["dsf_validation"]["roundtrip"] = "ok"
+        validation_metrics["roundtrip"] = "ok"
         try:
             properties = parse_properties_from_file(text_path)
             actual_bounds = parse_bounds(properties)
         except ValueError as exc:
             message = f"DSF bounds parse failed: {exc}"
-            metrics["dsf_validation"]["bounds_error"] = str(exc)
+            validation_metrics["bounds_error"] = str(exc)
             _ensure_messages(tile_entry).append(message)
             _mark_error(tile_entry)
             report.setdefault("errors", []).append(f"{tile}: {message}")
             continue
         expected_bounds = expected_bounds_for_tile(tile)
         mismatches = compare_bounds(expected_bounds, actual_bounds)
-        metrics["dsf_validation"]["bounds"] = {
+        validation_metrics["bounds"] = {
             "expected": expected_bounds.__dict__,
             "actual": actual_bounds.__dict__,
             "mismatches": mismatches,

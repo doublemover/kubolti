@@ -128,7 +128,11 @@ def test_apply_coverage_metrics() -> None:
     )
     build._apply_coverage_metrics(report, {"+47+008": metrics})
 
-    assert report["tiles"][0]["metrics"]["coverage"]["coverage_after"] == 0.9
+    tile_metrics = report["tiles"][0].get("metrics")
+    assert isinstance(tile_metrics, dict)
+    coverage = tile_metrics.get("coverage")
+    assert isinstance(coverage, dict)
+    assert coverage["coverage_after"] == 0.9
 
 
 def test_triangle_guardrails(monkeypatch, tmp_path: Path) -> None:
@@ -353,7 +357,11 @@ def test_apply_xp12_enrichment_enriched(monkeypatch, tmp_path: Path) -> None:
         output_dir,
     )
 
-    assert report["tiles"][0]["metrics"]["xp12_enrichment"]["status"] == "enriched"
+    tile_metrics = report["tiles"][0].get("metrics")
+    assert isinstance(tile_metrics, dict)
+    enrichment = tile_metrics.get("xp12_enrichment")
+    assert isinstance(enrichment, dict)
+    assert enrichment["status"] == "enriched"
 
 
 def test_apply_xp12_enrichment_postcheck_warning(monkeypatch, tmp_path: Path) -> None:

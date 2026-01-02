@@ -186,3 +186,141 @@ def test_e2e_patch_and_overlay(tmp_path: Path) -> None:
     assert overlay_terrain.exists()
     assert "../textures/overlay.dds" in overlay_terrain.read_text(encoding="utf-8")
     assert (overlay_dir / "overlay_report.json").exists()
+
+
+@pytest.mark.xfail(reason="Tile inference not implemented yet.", strict=True)
+def test_e2e_build_infers_tiles(tmp_path: Path) -> None:
+    repo_root = _repo_root()
+    dem_path = tmp_path / "dem.tif"
+    _write_demo_dem(dem_path, nodata=-9999.0)
+
+    runner_path = _write_stub_runner(tmp_path / "runner.py")
+    build_dir = tmp_path / "build"
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "dem2dsf",
+            "build",
+            "--dem",
+            str(dem_path),
+            "--runner",
+            sys.executable,
+            str(runner_path),
+            "--output",
+            str(build_dir),
+        ],
+        cwd=repo_root,
+        env=with_src_env(),
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
+    assert xplane_dsf_path(build_dir, "+47+008").exists()
+
+
+@pytest.mark.xfail(reason="AOI-driven builds not implemented yet.", strict=True)
+def test_e2e_build_with_aoi(tmp_path: Path) -> None:
+    repo_root = _repo_root()
+    dem_path = tmp_path / "dem.tif"
+    _write_demo_dem(dem_path, nodata=-9999.0)
+    aoi_path = tmp_path / "aoi.json"
+    aoi_path.write_text(
+        json.dumps(
+            {
+                "type": "Polygon",
+                "coordinates": [
+                    [
+                        [8.0, 47.0],
+                        [9.0, 47.0],
+                        [9.0, 48.0],
+                        [8.0, 48.0],
+                        [8.0, 47.0],
+                    ]
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    runner_path = _write_stub_runner(tmp_path / "runner.py")
+    build_dir = tmp_path / "build"
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "dem2dsf",
+            "build",
+            "--dem",
+            str(dem_path),
+            "--aoi",
+            str(aoi_path),
+            "--runner",
+            sys.executable,
+            str(runner_path),
+            "--output",
+            str(build_dir),
+        ],
+        cwd=repo_root,
+        env=with_src_env(),
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
+
+
+@pytest.mark.xfail(reason="Publish modes not implemented yet.", strict=True)
+def test_e2e_publish_modes(tmp_path: Path) -> None:
+    repo_root = _repo_root()
+    build_dir = tmp_path / "build"
+    build_dir.mkdir()
+    (build_dir / "build_plan.json").write_text("{}", encoding="utf-8")
+    output_zip = tmp_path / "build.zip"
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "dem2dsf",
+            "publish",
+            "--build-dir",
+            str(build_dir),
+            "--output",
+            str(output_zip),
+            "--mode",
+            "scenery",
+        ],
+        cwd=repo_root,
+        env=with_src_env(),
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
+    assert output_zip.exists()
+
+    output_zip_full = tmp_path / "build_full.zip"
+    result_full = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "dem2dsf",
+            "publish",
+            "--build-dir",
+            str(build_dir),
+            "--output",
+            str(output_zip_full),
+            "--mode",
+            "full",
+        ],
+        cwd=repo_root,
+        env=with_src_env(),
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result_full.returncode == 0, (
+        f"stdout:\n{result_full.stdout}\nstderr:\n{result_full.stderr}"
+    )
+    assert output_zip_full.exists()

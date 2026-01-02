@@ -9,8 +9,9 @@ from zipfile import ZipFile
 def _load_bundle():
     module_path = Path(__file__).resolve().parents[1] / "scripts" / "bundle_diagnostics.py"
     spec = importlib.util.spec_from_file_location("bundle_diagnostics", module_path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"Unable to load script: {module_path}")
     module = importlib.util.module_from_spec(spec)
-    assert spec and spec.loader
     spec.loader.exec_module(module)
     return module
 

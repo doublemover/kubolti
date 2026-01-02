@@ -8,6 +8,7 @@ import sys
 import warnings
 from pathlib import Path
 
+import numpy as np
 import pytest
 
 from dem2dsf.doctor import run_doctor
@@ -17,12 +18,13 @@ from dem2dsf.tools.dsftool import roundtrip_dsf, run_dsftool
 from dem2dsf.tools.ortho4xp import TARGET_ORTHO4XP_VERSION, ortho4xp_version
 from dem2dsf.xp12 import enrich_dsf_rasters
 from dem2dsf.xplane_paths import parse_tile
-from tests.utils import with_src_env
+from tests.utils import with_src_env, write_raster
 
 pytestmark = pytest.mark.integration
 
 ORTHO4XP_SOURCE_URL = "https://github.com/oscarpilote/Ortho4XP"
 XPTOOLS_SOURCE_URL = "https://developer.x-plane.com/tools/xptools/"
+RUN_ORTHO_BUILD_ENV = "DEM2DSF_RUN_ORTHO4XP_BUILD"
 
 
 def _repo_root() -> Path:
@@ -223,6 +225,57 @@ def test_integration_ortho4xp_entrypoint_uses_supported_args(tmp_path: Path) -> 
             break
     else:
         raise AssertionError("Dry run command not found in output.")
+
+
+def test_integration_ortho4xp_build_smoke(tmp_path: Path) -> None:
+    if not os.environ.get(RUN_ORTHO_BUILD_ENV):
+        pytest.skip(f"Set {RUN_ORTHO_BUILD_ENV}=1 to enable Ortho4XP build smoke test.")
+    repo_root = _repo_root()
+    tool_paths = tool_config.load_tool_paths()
+    search_dirs = _tool_search_dirs(repo_root)
+    script_path, _ = _resolve_tool_path(
+        "ortho4xp",
+        tool_paths=tool_paths,
+        search_dirs=search_dirs,
+        finder=installer.find_ortho4xp,
+    )
+    if not script_path:
+        pytest.skip(f"Ortho4XP not found (source: {ORTHO4XP_SOURCE_URL}).")
+    runner = repo_root / "scripts" / "ortho4xp_runner.py"
+    if not runner.exists():
+        pytest.skip("scripts/ortho4xp_runner.py not found.")
+
+    dem_path = tmp_path / "dem.tif"
+    write_raster(
+        dem_path,
+        data=np.array([[100.0, 101.0], [102.0, 103.0]], dtype="float32"),
+        bounds=(8.0, 47.0, 9.0, 48.0),
+        nodata=-9999.0,
+    )
+    output_dir = tmp_path / "build"
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(runner),
+            "--tile",
+            "+47+008",
+            "--dem",
+            str(dem_path),
+            "--output",
+            str(output_dir),
+            "--ortho-root",
+            str(script_path.parent),
+            "--batch",
+            "--autoortho",
+        ],
+        env=with_src_env(),
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
+    assert (output_dir / "Earth nav data").exists()
 
 
 def test_integration_dsftool_roundtrip(tmp_path: Path) -> None:

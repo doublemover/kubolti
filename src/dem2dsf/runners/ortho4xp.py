@@ -141,6 +141,7 @@ def _write_logs(
 
 
 def _write_stage_metadata(output_dir: Path, tile: str, staged_path: Path) -> None:
+    """Write staged DEM metadata for the runner logs."""
     log_dir = output_dir / "runner_logs"
     log_dir.mkdir(parents=True, exist_ok=True)
     payload = {"staged_dem": str(staged_path)}
@@ -158,6 +159,7 @@ LOGGER = logging.getLogger("dem2dsf.runner")
 
 
 def _event_from_line(line: str) -> dict[str, str] | None:
+    """Extract a structured event from a runner output line."""
     stripped = line.strip()
     if not stripped:
         return None
@@ -176,9 +178,9 @@ def _event_from_line(line: str) -> dict[str, str] | None:
     return None
 
 
-def parse_runner_events(stdout: str, stderr: str) -> list[dict[str, str]]:
+def parse_runner_events(stdout: str, stderr: str) -> list[dict[str, str | int]]:
     """Parse Ortho4XP output into structured milestone events."""
-    events: list[dict[str, str]] = []
+    events: list[dict[str, str | int]] = []
     for stream, output in (("stdout", stdout), ("stderr", stderr)):
         for index, line in enumerate(output.splitlines(), start=1):
             event = _event_from_line(line)
@@ -195,6 +197,7 @@ def parse_runner_events(stdout: str, stderr: str) -> list[dict[str, str]]:
 
 
 def _runner_env() -> dict[str, str]:
+    """Return an environment mapping with src/ on PYTHONPATH."""
     env = dict(os.environ)
     source_root = Path(__file__).resolve().parents[3] / "src"
     if (source_root / "dem2dsf").exists():
@@ -215,6 +218,7 @@ def _run_with_config(
     cwd: Path,
     persist_config: bool,
 ) -> subprocess.CompletedProcess[str]:
+    """Run Ortho4XP with optional config overrides."""
     original_config: str | None = None
     patched = False
     if config_updates:
@@ -235,9 +239,13 @@ def _run_with_config(
 
 
 def _min_angle_from_config(config_path: Path, config_updates: dict[str, object]) -> float | None:
-    if "min_angle" in config_updates:
+    """Return the min_angle value from updates or config file."""
+    value = config_updates.get("min_angle")
+    if value is not None:
+        if not isinstance(value, (int, float, str)):
+            return None
         try:
-            return float(config_updates["min_angle"])
+            return float(value)
         except (TypeError, ValueError):
             return None
     config = read_config_values(config_path)
@@ -250,6 +258,7 @@ def _min_angle_from_config(config_path: Path, config_updates: dict[str, object])
 
 
 def _retry_min_angles(base: float | None) -> list[float]:
+    """Return a retry ladder of min_angle values below the base."""
     ladder = [5.0, 0.0]
     if base is None:
         return ladder
@@ -257,6 +266,7 @@ def _retry_min_angles(base: float | None) -> list[float]:
 
 
 def _needs_triangulation_retry(stdout: str, stderr: str) -> bool:
+    """Return True if output suggests a triangulation retry is needed."""
     output = f"{stdout}\n{stderr}"
     return bool(TRIANGLE_FAILURE_PATTERN.search(output))
 

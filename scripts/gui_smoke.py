@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import sys
-from types import SimpleNamespace
+from types import ModuleType
 
 from dem2dsf import gui
 
@@ -64,31 +64,32 @@ class _DummyButton(_DummyWidget):
 
 
 def _install_stub_tkinter() -> None:
-    ttk_module = SimpleNamespace(
-        Notebook=_DummyNotebook,
-        Frame=_DummyWidget,
-        Label=_DummyWidget,
-        Entry=_DummyWidget,
-        Combobox=_DummyWidget,
-        Checkbutton=_DummyWidget,
-        Button=_DummyButton,
-    )
-    messagebox = SimpleNamespace(showerror=lambda *_: None)
-    filedialog = SimpleNamespace(
-        askopenfilename=lambda **_kwargs: "",
-        askopenfilenames=lambda **_kwargs: (),
-        askdirectory=lambda **_kwargs: "",
-        asksaveasfilename=lambda **_kwargs: "",
-    )
-    tk_module = SimpleNamespace(
-        Tk=_DummyTk,
-        StringVar=_DummyVar,
-        BooleanVar=_DummyVar,
-        Text=_DummyWidget,
-        ttk=ttk_module,
-        messagebox=messagebox,
-        filedialog=filedialog,
-    )
+    ttk_module = ModuleType("tkinter.ttk")
+    setattr(ttk_module, "Notebook", _DummyNotebook)
+    setattr(ttk_module, "Frame", _DummyWidget)
+    setattr(ttk_module, "Label", _DummyWidget)
+    setattr(ttk_module, "Entry", _DummyWidget)
+    setattr(ttk_module, "Combobox", _DummyWidget)
+    setattr(ttk_module, "Checkbutton", _DummyWidget)
+    setattr(ttk_module, "Button", _DummyButton)
+
+    messagebox = ModuleType("tkinter.messagebox")
+    setattr(messagebox, "showerror", lambda *_: None)
+
+    filedialog = ModuleType("tkinter.filedialog")
+    setattr(filedialog, "askopenfilename", lambda **_kwargs: "")
+    setattr(filedialog, "askopenfilenames", lambda **_kwargs: ())
+    setattr(filedialog, "askdirectory", lambda **_kwargs: "")
+    setattr(filedialog, "asksaveasfilename", lambda **_kwargs: "")
+
+    tk_module = ModuleType("tkinter")
+    setattr(tk_module, "Tk", _DummyTk)
+    setattr(tk_module, "StringVar", _DummyVar)
+    setattr(tk_module, "BooleanVar", _DummyVar)
+    setattr(tk_module, "Text", _DummyWidget)
+    setattr(tk_module, "ttk", ttk_module)
+    setattr(tk_module, "messagebox", messagebox)
+    setattr(tk_module, "filedialog", filedialog)
     sys.modules.setdefault("tkinter", tk_module)
     sys.modules.setdefault("tkinter.ttk", ttk_module)
     sys.modules.setdefault("tkinter.messagebox", messagebox)

@@ -180,6 +180,7 @@ python scripts/run_ci_perf.py --output-dir perf_ci --runs 1
 ```bash
 python scripts/install_dev.py
 ruff check .
+pyright
 pytest --cov=dem2dsf --cov-report=term-missing
 pytest -m e2e
 pytest -m integration

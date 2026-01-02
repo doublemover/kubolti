@@ -25,11 +25,13 @@ def _read_scenery_packs(root: Path) -> list[str] | None:
 
 
 def _is_overlay_pack(name: str) -> bool:
+    """Return True if a scenery pack looks like an overlay pack."""
     lowered = name.lower()
     return lowered.startswith("yortho4xp_") or "overlay" in lowered
 
 
 def _is_base_mesh_pack(name: str) -> bool:
+    """Return True if a scenery pack looks like a base mesh pack."""
     lowered = name.lower()
     return lowered.startswith("zortho4xp_") or "mesh" in lowered
 

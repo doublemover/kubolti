@@ -101,11 +101,8 @@ def load_gui_prefs(path: Path | None = None) -> dict[str, dict[str, Any]]:
 
 def save_gui_prefs(payload: dict[str, dict[str, Any]], path: Path | None = None) -> Path:
     """Persist GUI preferences to disk and return the path."""
-    output_path = (
-        Path(os.environ.get(ENV_GUI_PREFS))
-        if os.environ.get(ENV_GUI_PREFS)
-        else (path or default_gui_prefs_path())
-    )
+    env_path = os.environ.get(ENV_GUI_PREFS)
+    output_path = Path(env_path) if env_path else (path or default_gui_prefs_path())
     output_path.parent.mkdir(parents=True, exist_ok=True)
     wrapped = {
         "version": GUI_PREFS_VERSION,
@@ -176,6 +173,7 @@ def _apply_tool_defaults(
 
 
 def _runner_has_flag(runner: list[str], flag: str) -> bool:
+    """Return True when a runner command already includes a flag."""
     for token in runner:
         if token == flag or token.startswith(f"{flag}="):
             return True
@@ -190,6 +188,7 @@ def _apply_runner_overrides(
     ortho_batch: bool,
     persist_config: bool,
 ) -> None:
+    """Inject runner flags based on GUI overrides."""
     runner = options.get("runner")
     if not runner:
         return
@@ -368,16 +367,19 @@ def launch_gui() -> None:
     _apply_prefs(publish_vars, prefs.get("publish", {}))
 
     def log_message(text: str) -> None:
+        """Append a line to the GUI log widget."""
         log.insert("end", text + "\n")
         log.see("end")
 
     def save_preferences() -> None:
+        """Persist GUI preferences and log failures."""
         try:
             save_gui_prefs(_collect_prefs(build_vars, publish_vars))
         except (OSError, ValueError, TypeError):
             log_message("Failed to save GUI preferences.")
 
     def apply_preset() -> None:
+        """Apply the selected preset to build fields."""
         preset_name = build_vars["preset"].get()
         preset = get_preset(preset_name or "")
         if not preset:
@@ -389,11 +391,13 @@ def launch_gui() -> None:
         log_message(f"Applied preset: {preset.name}")
 
     def browse_dems() -> None:
+        """Open a file chooser for DEM inputs."""
         paths = filedialog.askopenfilenames(title="Select DEM files")
         if paths:
             build_vars["dems"].set(", ".join(paths))
 
     def browse_dem_stack() -> None:
+        """Open a file chooser for DEM stack definitions."""
         path = filedialog.askopenfilename(
             title="Select DEM stack JSON",
             filetypes=[("JSON files", "*.json"), ("All files", "*.*")],
@@ -402,36 +406,43 @@ def launch_gui() -> None:
             build_vars["dem_stack"].set(path)
 
     def browse_output_dir() -> None:
+        """Open a directory chooser for build output."""
         path = filedialog.askdirectory(title="Select output directory")
         if path:
             build_vars["output_dir"].set(path)
 
     def browse_ortho_root() -> None:
+        """Open a directory chooser for the Ortho4XP root."""
         path = filedialog.askdirectory(title="Select Ortho4XP root")
         if path:
             build_vars["ortho_root"].set(path)
 
     def browse_ortho_python() -> None:
+        """Open a file chooser for the Ortho4XP Python runtime."""
         path = filedialog.askopenfilename(title="Select Ortho4XP Python executable")
         if path:
             build_vars["ortho_python"].set(path)
 
     def browse_dsftool() -> None:
+        """Open a file chooser for the DSFTool executable."""
         path = filedialog.askopenfilename(title="Select DSFTool executable")
         if path:
             build_vars["dsftool_path"].set(path)
 
     def browse_fallback() -> None:
+        """Open a file chooser for fallback DEMs."""
         paths = filedialog.askopenfilenames(title="Select fallback DEMs")
         if paths:
             build_vars["fallback_dems"].set(", ".join(paths))
 
     def browse_global_scenery() -> None:
+        """Open a directory chooser for Global Scenery."""
         path = filedialog.askdirectory(title="Select Global Scenery folder")
         if path:
             build_vars["global_scenery"].set(path)
 
     def browse_metrics_json() -> None:
+        """Open a save dialog for metrics JSON output."""
         path = filedialog.asksaveasfilename(
             title="Save metrics JSON",
             defaultextension=".json",
@@ -441,6 +452,7 @@ def launch_gui() -> None:
             build_vars["metrics_json"].set(path)
 
     def on_build() -> None:
+        """Run a build using the current GUI field values."""
         values = {key: var.get() for key, var in build_vars.items()}
         try:
             dem_paths, tiles, output_dir, options = build_form_to_request(values)
@@ -470,6 +482,7 @@ def launch_gui() -> None:
             messagebox.showerror("Build failed", str(exc))
 
     def on_publish() -> None:
+        """Run a publish using the current GUI field values."""
         values = {key: var.get() for key, var in publish_vars.items()}
         try:
             build_dir, output_zip, options = publish_form_to_request(values)
@@ -486,11 +499,13 @@ def launch_gui() -> None:
         except Exception as exc:
             messagebox.showerror("Publish failed", str(exc))
 
-    def add_row(parent, label, widget, row) -> None:
+    def add_row(parent: Any, label: str, widget: Any, row: int) -> None:
+        """Add a labeled widget row to the provided parent frame."""
         ttk.Label(parent, text=label).grid(row=row, column=0, sticky="w", padx=4, pady=4)
         widget.grid(row=row, column=1, sticky="ew", padx=4, pady=4)
 
-    def add_row_with_button(parent, label, widget, row, button) -> None:
+    def add_row_with_button(parent: Any, label: str, widget: Any, row: int, button: Any) -> None:
+        """Add a labeled widget row with an extra action button."""
         add_row(parent, label, widget, row)
         button.grid(row=row, column=2, sticky="e", padx=4, pady=4)
 
@@ -819,6 +834,7 @@ def launch_gui() -> None:
     log.pack(fill="both", expand=False, padx=10, pady=10)
 
     def on_close() -> None:
+        """Save preferences and close the GUI."""
         save_preferences()
         root.destroy()
 
