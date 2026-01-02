@@ -106,6 +106,15 @@ def test_resolution_from_options_handles_polar(monkeypatch) -> None:
     assert res == (30.0 / 111_320.0, 30.0 / 111_320.0)
 
 
+def test_normalize_compression() -> None:
+    assert build._normalize_compression(None) is None
+    assert build._normalize_compression("none") is None
+    assert build._normalize_compression("lzw") == "LZW"
+    assert build._normalize_compression("DEFLATE") == "DEFLATE"
+    with pytest.raises(ValueError, match="normalized_compression"):
+        build._normalize_compression("zip")
+
+
 def test_apply_coverage_metrics() -> None:
     report = {"tiles": [{"tile": "+47+008"}, {"tile": "+49+008"}, {"status": "ok"}]}
     metrics = CoverageMetrics(
@@ -556,6 +565,8 @@ def test_run_build_uses_normalization_cache(monkeypatch, tmp_path: Path) -> None
         fill_value=0.0,
         backend_profile=None,
         dem_stack=None,
+        mosaic_strategy="full",
+        normalized_compression=None,
     )
     cache = build.NormalizationCache(
         version=build.CACHE_VERSION,
@@ -564,7 +575,9 @@ def test_run_build_uses_normalization_cache(monkeypatch, tmp_path: Path) -> None
         options=cache_options,
         tiles=(tile,),
         tile_paths={tile: str(tile_path)},
+        tile_fingerprints={tile: build.SourceFingerprint.from_path(tile_path)},
         mosaic_path=str(mosaic_path),
+        mosaic_fingerprint=build.SourceFingerprint.from_path(mosaic_path),
         coverage={
             tile: CoverageMetrics(
                 total_pixels=1,

@@ -211,6 +211,8 @@ def build_form_to_request(
     dem_stack = values.get("dem_stack") or ""
     tiles = parse_list(values.get("tiles", ""))
     output_dir = Path(values.get("output_dir") or "build")
+    tile_jobs_value = parse_optional_int(values.get("tile_jobs", ""))
+    tile_jobs = 1 if tile_jobs_value is None else tile_jobs_value
     options = {
         "quality": values.get("quality", "compat"),
         "density": values.get("density", "medium"),
@@ -223,7 +225,7 @@ def build_form_to_request(
         "fill_value": parse_optional_float(values.get("fill_value", "") or "0") or 0.0,
         "fallback_dem_paths": parse_list(values.get("fallback_dems", "")),
         "normalize": not bool(values.get("skip_normalize", False)),
-        "tile_jobs": parse_optional_int(values.get("tile_jobs", "") or "1") or 1,
+        "tile_jobs": tile_jobs,
         "triangle_warn": parse_optional_int(values.get("triangle_warn", "")),
         "triangle_max": parse_optional_int(values.get("triangle_max", "")),
         "allow_triangle_overage": bool(values.get("allow_triangle_overage", False)),
@@ -569,7 +571,7 @@ def launch_gui() -> None:
     mosaic_box = ttk.Combobox(
         build_frame,
         textvariable=build_vars["mosaic_strategy"],
-        values=["full", "per-tile"],
+        values=["full", "per-tile", "vrt"],
     )
     add_row(build_frame, "Mosaic strategy", mosaic_box, row)
     row += 1

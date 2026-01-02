@@ -71,6 +71,8 @@ def test_wizard_interactive(monkeypatch, tmp_path) -> None:
             "constant",
             "5",
             "",  # mosaic strategy
+            "",  # normalized compression
+            "",  # cache sha256
             "",  # tile jobs
             "",  # continue on error
             "",  # coverage metrics
@@ -130,6 +132,8 @@ def test_wizard_interactive_stack(monkeypatch, tmp_path) -> None:
             "",  # dst nodata
             "",  # fill strategy
             "",  # mosaic strategy
+            "",  # normalized compression
+            "",  # cache sha256
             "",  # tile jobs
             "",  # continue on error
             "",  # coverage metrics
@@ -182,6 +186,8 @@ def test_wizard_interactive_applies_options(monkeypatch, tmp_path) -> None:
             "1",
             "none",
             "per-tile",
+            "lzw",
+            "y",
             "4",
             "y",
             "y",
@@ -229,6 +235,8 @@ def test_wizard_interactive_applies_options(monkeypatch, tmp_path) -> None:
     assert captured["triangle_max"] == 456
     assert captured["allow_triangle_overage"] is True
     assert captured["mosaic_strategy"] == "per-tile"
+    assert captured["normalized_compression"] == "lzw"
+    assert captured["cache_sha256"] is True
     assert captured["continue_on_error"] is True
     assert captured["coverage_metrics"] is True
     assert captured["coverage_min"] == 0.9

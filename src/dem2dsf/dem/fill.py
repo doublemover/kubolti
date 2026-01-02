@@ -26,6 +26,7 @@ class FillResult:
     filled: np.ndarray
     nodata: float | None
     filled_pixels: int
+    nodata_pixels_after: int
 
 
 def fill_with_constant(
@@ -36,11 +37,13 @@ def fill_with_constant(
 ) -> FillResult:
     """Fill nodata pixels with a constant value."""
     if nodata is None:
-        return FillResult(data, nodata, 0)
+        return FillResult(data, nodata, 0, 0)
     mask = _nodata_mask(data, nodata)
     filled = data.copy()
     filled[mask] = fill_value
-    return FillResult(filled, nodata, int(mask.sum()))
+    after_mask = _nodata_mask(filled, nodata)
+    filled_pixels = int(mask.sum() - after_mask.sum())
+    return FillResult(filled, nodata, filled_pixels, int(after_mask.sum()))
 
 
 def fill_with_interpolation(
@@ -51,12 +54,14 @@ def fill_with_interpolation(
 ) -> FillResult:
     """Fill nodata pixels by interpolating neighboring values."""
     if nodata is None:
-        return FillResult(data, nodata, 0)
+        return FillResult(data, nodata, 0, 0)
     mask = _nodata_mask(data, nodata)
     if not mask.any():
-        return FillResult(data, nodata, 0)
+        return FillResult(data, nodata, 0, 0)
     filled = fillnodata(data, mask=~mask, max_search_distance=max_search_distance)
-    return FillResult(filled, nodata, int(mask.sum()))
+    after_mask = _nodata_mask(filled, nodata)
+    filled_pixels = int(mask.sum() - after_mask.sum())
+    return FillResult(filled, nodata, filled_pixels, int(after_mask.sum()))
 
 
 def fill_with_fallback(
@@ -67,13 +72,15 @@ def fill_with_fallback(
 ) -> FillResult:
     """Fill nodata pixels from a fallback raster of the same shape."""
     if nodata is None:
-        return FillResult(primary, nodata, 0)
+        return FillResult(primary, nodata, 0, 0)
     if primary.shape != fallback.shape:
         raise ValueError("Primary and fallback rasters must share a shape.")
     mask = _nodata_mask(primary, nodata)
     merged = primary.copy()
     merged[mask] = fallback[mask]
-    return FillResult(merged, nodata, int(mask.sum()))
+    after_mask = _nodata_mask(merged, nodata)
+    filled_pixels = int(mask.sum() - after_mask.sum())
+    return FillResult(merged, nodata, filled_pixels, int(after_mask.sum()))
 
 
 def fill_tile_in_place(

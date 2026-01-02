@@ -6,8 +6,10 @@ Source: DEM2DSF spec + implementation (internal reference).
 DEM2DSF moves data through multiple formats. Understanding what each file encodes helps debug failed builds and keep outputs compatible with Ortho4XP and X-Plane.
 
 ## Key points
-- GeoTIFF tile DEMs: EPSG:4326, 1x1 degree bounds, nodata defined (Ortho4XP defaults to -32768).
-- VRT mosaics: virtual datasets that merge multiple DEM inputs with consistent CRS and resolution before tiling.
+- GeoTIFF tile DEMs: EPSG:4326, 1x1 degree bounds, nodata defined (Ortho4XP defaults
+  to -32768). Optional LZW/DEFLATE compression via `--normalized-compression`.
+- VRT mosaics: virtual datasets that merge multiple DEM inputs with consistent CRS and resolution before tiling
+  (use `--mosaic-strategy vrt`; default `full` builds a GeoTIFF mosaic, `per-tile` streams merges per tile).
 - DSF tiles: produced per `+DD+DDD` tile under `Earth nav data/<bucket>/<tile>.dsf`
   (bucket is the 10x10 folder like `+40+000`). Optional 7z compression is allowed,
   but DSFTool 2.2+ is required to read 7z-compressed DSFs directly.

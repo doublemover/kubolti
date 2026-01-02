@@ -12,7 +12,8 @@ from dem2dsf.density import DENSITY_PRESETS
 
 FILL_CHOICES = ("none", "constant", "interpolate", "fallback")
 RESAMPLING_CHOICES = ("nearest", "bilinear", "cubic", "average")
-MOSAIC_CHOICES = ("full", "per-tile")
+MOSAIC_CHOICES = ("full", "per-tile", "vrt")
+COMPRESSION_CHOICES = ("none", "lzw", "deflate")
 
 
 def _prompt_list(prompt: str) -> list[str]:
@@ -203,6 +204,8 @@ def run_wizard(
     fill_value = float(options.get("fill_value", 0.0) or 0.0)
     fallback_dem_paths = list(options.get("fallback_dem_paths") or [])
     mosaic_strategy = options.get("mosaic_strategy", "full")
+    normalized_compression = options.get("normalized_compression") or "none"
+    cache_sha256 = bool(options.get("cache_sha256", False))
     if not skip_normalize:
         target_crs = _prompt_optional_str("Target CRS", target_crs)
         resampling = _prompt_choice(
@@ -234,8 +237,20 @@ def run_wizard(
             MOSAIC_CHOICES,
             mosaic_strategy,
         )
+        normalized_compression = _prompt_choice(
+            "Normalized tile compression",
+            COMPRESSION_CHOICES,
+            normalized_compression,
+        )
+        cache_sha256 = _prompt_bool(
+            "Validate normalization cache with SHA-256",
+            cache_sha256,
+        )
 
-    tile_jobs = _prompt_optional_int("Tile workers (1 for serial)", options.get("tile_jobs", 1))
+    tile_jobs = _prompt_optional_int(
+        "Tile workers (0=auto, 1=serial)",
+        options.get("tile_jobs", 1),
+    )
     continue_on_error = _prompt_bool(
         "Continue on error",
         bool(options.get("continue_on_error", False)),
@@ -297,6 +312,8 @@ def run_wizard(
         "fill_value": fill_value,
         "fallback_dem_paths": fallback_dem_paths,
         "mosaic_strategy": mosaic_strategy,
+        "normalized_compression": normalized_compression,
+        "cache_sha256": cache_sha256,
         "tile_jobs": tile_jobs,
         "continue_on_error": continue_on_error,
         "coverage_min": coverage_min,

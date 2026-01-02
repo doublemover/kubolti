@@ -72,7 +72,8 @@ def test_apply_fill_strategy_interpolate(tmp_path: Path) -> None:
         fallback_path=None,
     )
 
-    assert filled >= 0
+    assert filled is not None
+    assert filled.filled_pixels >= 0
 
 
 def test_apply_fill_strategy_requires_fallback(tmp_path: Path) -> None:
@@ -197,6 +198,29 @@ def test_normalize_for_tiles_multiple_dem_mosaic(tmp_path: Path) -> None:
     )
 
     assert result.mosaic_path.name == "mosaic.tif"
+    assert result.mosaic_path.exists()
+
+
+def test_normalize_for_tiles_vrt_mosaic(tmp_path: Path) -> None:
+    with rasterio.Env() as env:
+        drivers = env.drivers()
+    if "VRT" not in drivers:
+        pytest.skip("VRT driver not available")
+    dem_a = tmp_path / "a.tif"
+    dem_b = tmp_path / "b.tif"
+    data = np.array([[1]], dtype=np.int16)
+    write_raster(dem_a, data, bounds=(8.0, 47.0, 9.0, 48.0))
+    write_raster(dem_b, data, bounds=(8.0, 47.0, 9.0, 48.0))
+
+    result = pipeline.normalize_for_tiles(
+        [dem_a, dem_b],
+        ["+47+008"],
+        tmp_path / "work",
+        target_crs="EPSG:4326",
+        mosaic_strategy="vrt",
+    )
+
+    assert result.mosaic_path.name == "mosaic.vrt"
     assert result.mosaic_path.exists()
 
 

@@ -70,6 +70,7 @@ def write_tile_dem(
     resolution: Tuple[float, float] | None = None,
     resampling: Resampling = Resampling.bilinear,
     dst_nodata: float | None = None,
+    compression: str | None = None,
 ) -> TileResult:
     """Clip and resample a DEM into a single tile GeoTIFF."""
     bounds_wgs84 = tile_bounds(tile)
@@ -94,6 +95,8 @@ def write_tile_dem(
                 "nodata": nodata,
             }
         )
+        if compression:
+            meta["compress"] = compression
         output_path.parent.mkdir(parents=True, exist_ok=True)
         with rasterio.open(output_path, "w", **meta) as dest:
             for band in range(1, src.count + 1):

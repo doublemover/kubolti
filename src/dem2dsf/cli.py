@@ -70,6 +70,8 @@ class BuildOptions:
     coverage_hard_fail: bool
     coverage_metrics: bool
     mosaic_strategy: str
+    normalized_compression: str | None
+    cache_sha256: bool
     runner_timeout: float | None
     runner_retries: int
     runner_stream_logs: bool
@@ -107,6 +109,8 @@ class BuildOptions:
             "coverage_hard_fail": self.coverage_hard_fail,
             "coverage_metrics": self.coverage_metrics,
             "mosaic_strategy": self.mosaic_strategy,
+            "normalized_compression": self.normalized_compression,
+            "cache_sha256": self.cache_sha256,
             "runner_timeout": self.runner_timeout,
             "runner_retries": self.runner_retries,
             "runner_stream_logs": self.runner_stream_logs,
@@ -131,6 +135,9 @@ def _build_options_from_args(
     resolved_autoortho = autoortho
     if resolved_autoortho is None:
         resolved_autoortho = bool(getattr(args, "autoortho", False))
+    tile_jobs_value = getattr(args, "tile_jobs", 1)
+    if tile_jobs_value is None:
+        tile_jobs_value = 1
     return BuildOptions(
         quality=args.quality,
         density=args.density,
@@ -146,7 +153,7 @@ def _build_options_from_args(
         fill_strategy=args.fill_strategy,
         fill_value=float(getattr(args, "fill_value", 0.0) or 0.0),
         fallback_dem_paths=getattr(args, "fallback_dem", None),
-        tile_jobs=int(getattr(args, "tile_jobs", 1) or 1),
+        tile_jobs=int(tile_jobs_value),
         normalize=not bool(getattr(args, "skip_normalize", False)),
         triangle_warn=getattr(args, "warn_triangles", None),
         triangle_max=getattr(args, "max_triangles", None),
@@ -156,6 +163,8 @@ def _build_options_from_args(
         coverage_hard_fail=bool(getattr(args, "coverage_hard_fail", False)),
         coverage_metrics=not bool(getattr(args, "skip_coverage_metrics", False)),
         mosaic_strategy=getattr(args, "mosaic_strategy", "full"),
+        normalized_compression=getattr(args, "normalized_compression", None),
+        cache_sha256=bool(getattr(args, "cache_sha256", False)),
         runner_timeout=getattr(args, "runner_timeout", None),
         runner_retries=int(getattr(args, "runner_retries", 0) or 0),
         runner_stream_logs=bool(getattr(args, "runner_stream_logs", False)),
@@ -259,13 +268,24 @@ def _add_build_parser(subparsers: argparse._SubParsersAction) -> None:
         "--jobs",
         type=int,
         default=1,
-        help="Parallel tile workers for normalization (default: 1).",
+        help="Parallel tile workers for normalization (0 = auto, default: 1).",
     )
     build.add_argument(
         "--mosaic-strategy",
-        choices=("full", "per-tile"),
+        choices=("full", "per-tile", "vrt"),
         default="full",
         help="Mosaic strategy for multiple DEMs (default: full).",
+    )
+    build.add_argument(
+        "--normalized-compression",
+        choices=("none", "lzw", "deflate"),
+        default="none",
+        help="Compression for normalized tiles (default: none).",
+    )
+    build.add_argument(
+        "--cache-sha256",
+        action="store_true",
+        help="Validate normalization cache with SHA-256 checksums.",
     )
     build.add_argument(
         "--continue-on-error",
@@ -447,13 +467,24 @@ def _add_wizard_parser(subparsers: argparse._SubParsersAction) -> None:
         "--jobs",
         type=int,
         default=1,
-        help="Parallel tile workers for normalization (default: 1).",
+        help="Parallel tile workers for normalization (0 = auto, default: 1).",
     )
     wizard.add_argument(
         "--mosaic-strategy",
-        choices=("full", "per-tile"),
+        choices=("full", "per-tile", "vrt"),
         default="full",
         help="Mosaic strategy for multiple DEMs (default: full).",
+    )
+    wizard.add_argument(
+        "--normalized-compression",
+        choices=("none", "lzw", "deflate"),
+        default="none",
+        help="Compression for normalized tiles (default: none).",
+    )
+    wizard.add_argument(
+        "--cache-sha256",
+        action="store_true",
+        help="Validate normalization cache with SHA-256 checksums.",
     )
     wizard.add_argument(
         "--continue-on-error",
@@ -636,13 +667,24 @@ def _add_autoortho_parser(subparsers: argparse._SubParsersAction) -> None:
         "--jobs",
         type=int,
         default=1,
-        help="Parallel tile workers for normalization (default: 1).",
+        help="Parallel tile workers for normalization (0 = auto, default: 1).",
     )
     auto.add_argument(
         "--mosaic-strategy",
-        choices=("full", "per-tile"),
+        choices=("full", "per-tile", "vrt"),
         default="full",
         help="Mosaic strategy for multiple DEMs (default: full).",
+    )
+    auto.add_argument(
+        "--normalized-compression",
+        choices=("none", "lzw", "deflate"),
+        default="none",
+        help="Compression for normalized tiles (default: none).",
+    )
+    auto.add_argument(
+        "--cache-sha256",
+        action="store_true",
+        help="Validate normalization cache with SHA-256 checksums.",
     )
     auto.add_argument(
         "--continue-on-error",

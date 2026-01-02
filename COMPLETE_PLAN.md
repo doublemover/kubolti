@@ -161,7 +161,7 @@ Status legend: planned | in-progress | done. Update the status tags as work land
   - DDS header/format validation for packaged textures
   - Fail/warn policy controls
 
-## Phase 16 — Performance & Scale (planned)
+## Phase 16 — Performance & Scale (done)
 - Avoid in-memory per-tile merges for multi-source tiles (streaming merge to disk, GDAL VRT + Warp/VRT where appropriate).
 - Reduce redundant I/O in normalization:
   - windowed coverage metrics

@@ -7,6 +7,8 @@ import math
 from pathlib import Path
 from typing import Any, Iterable, Mapping
 
+import rasterio
+
 from dem2dsf.autoortho import scan_terrain_textures
 from dem2dsf.backends.base import BuildRequest, BuildResult
 from dem2dsf.backends.registry import get_backend
@@ -15,6 +17,8 @@ from dem2dsf.dem.adapter import profile_for_backend
 from dem2dsf.dem.cache import (
     CACHE_VERSION,
     NormalizationCache,
+    SourceFingerprint,
+    fingerprint_path_map,
     fingerprint_paths,
     load_normalization_cache,
     write_normalization_cache,
@@ -22,7 +26,7 @@ from dem2dsf.dem.cache import (
 from dem2dsf.dem.models import CoverageMetrics
 from dem2dsf.dem.pipeline import normalize_for_tiles, normalize_stack_for_tiles
 from dem2dsf.dem.stack import load_dem_stack, stack_to_options
-from dem2dsf.dem.tiling import tile_bounds
+from dem2dsf.dem.tiling import tile_bounds, tile_bounds_in_crs
 from dem2dsf.density import triangle_limits_for_preset
 from dem2dsf.diagnostics import bundle_diagnostics, default_bundle_path
 from dem2dsf.dsf import (
@@ -67,6 +71,8 @@ def _normalization_cache_options(
     fill_value: float,
     backend_profile: object | None,
     dem_stack: Mapping[str, Any] | None,
+    mosaic_strategy: str,
+    normalized_compression: str | None,
 ) -> dict[str, Any]:
     """Return the normalized cache options payload."""
     return {
@@ -78,6 +84,8 @@ def _normalization_cache_options(
         "fill_value": fill_value,
         "backend_profile": getattr(backend_profile, "name", None),
         "dem_stack": dict(dem_stack) if dem_stack else None,
+        "mosaic_strategy": mosaic_strategy,
+        "normalized_compression": normalized_compression,
     }
 
 
@@ -87,20 +95,33 @@ def _build_normalization_cache(
     options: Mapping[str, Any],
     fallback_sources: Iterable[Path],
     tiles: Iterable[str],
+    compute_sha256: bool,
 ) -> NormalizationCache:
     """Build a NormalizationCache from a completed normalization pass."""
     tile_paths = {
         tile_result.tile: str(tile_result.path.resolve())
         for tile_result in normalization.tile_results
     }
+    tile_fingerprints = fingerprint_path_map(
+        {tile: Path(path) for tile, path in tile_paths.items()},
+        compute_sha256=compute_sha256,
+    )
+    mosaic_path = Path(normalization.mosaic_path).resolve()
+    mosaic_fingerprint = (
+        SourceFingerprint.from_path(mosaic_path, compute_sha256=compute_sha256)
+        if mosaic_path.exists()
+        else None
+    )
     return NormalizationCache(
         version=CACHE_VERSION,
-        sources=fingerprint_paths(normalization.sources),
-        fallback_sources=fingerprint_paths(fallback_sources),
+        sources=fingerprint_paths(normalization.sources, compute_sha256=compute_sha256),
+        fallback_sources=fingerprint_paths(fallback_sources, compute_sha256=compute_sha256),
         options=dict(options),
         tiles=tuple(tiles),
         tile_paths=tile_paths,
-        mosaic_path=str(normalization.mosaic_path.resolve()),
+        tile_fingerprints=tile_fingerprints,
+        mosaic_path=str(mosaic_path),
+        mosaic_fingerprint=mosaic_fingerprint,
         coverage=normalization.coverage,
     )
 
@@ -186,6 +207,144 @@ def _resolution_from_options(
             meters_per_deg_lon = meters_per_deg_lat
         return (resolution_m / meters_per_deg_lon, resolution_m / meters_per_deg_lat)
     return (resolution_m, resolution_m)
+
+
+def _normalize_compression(value: object) -> str | None:
+    """Normalize compression option strings into GDAL-compatible values."""
+    if value is None:
+        return None
+    text = str(value).strip().lower()
+    if not text or text == "none":
+        return None
+    if text in {"lzw", "deflate"}:
+        return text.upper()
+    raise ValueError("normalized_compression must be one of: none, lzw, deflate.")
+
+
+def _format_bytes(value: float) -> str:
+    """Format a byte count for display."""
+    size = float(value)
+    for unit in ("B", "KB", "MB", "GB", "TB"):
+        if size < 1024 or unit == "TB":
+            return f"{size:.1f} {unit}"
+        size /= 1024
+    return f"{size:.1f} B"
+
+
+def _estimate_build_guardrails(
+    tiles: list[str],
+    *,
+    target_crs: str,
+    resolution: tuple[float, float] | None,
+    options: Mapping[str, Any],
+) -> tuple[dict[str, Any] | None, list[str]]:
+    """Estimate build sizes and return guardrail warnings."""
+    if not tiles or resolution is None:
+        return None, []
+    try:
+        crs = rasterio.CRS.from_string(target_crs)
+    except (TypeError, ValueError):
+        return None, []
+    res_x, res_y = abs(resolution[0]), abs(resolution[1])
+    if res_x <= 0 or res_y <= 0:
+        return None, []
+
+    max_width = 0
+    max_height = 0
+    max_pixels = 0
+    total_pixels = 0
+    for tile in tiles:
+        min_x, min_y, max_x, max_y = tile_bounds_in_crs(tile, crs)
+        width = max(1, int(math.ceil((max_x - min_x) / res_x)))
+        height = max(1, int(math.ceil((max_y - min_y) / res_y)))
+        pixels = width * height
+        max_width = max(max_width, width)
+        max_height = max(max_height, height)
+        max_pixels = max(max_pixels, pixels)
+        total_pixels += pixels
+
+    triangles_per_tile = 0
+    if max_width >= 2 and max_height >= 2:
+        triangles_per_tile = (max_width - 1) * (max_height - 1) * 2
+    triangles_total = triangles_per_tile * len(tiles)
+
+    bytes_per_pixel = 4
+    tile_bytes_estimate = max_pixels * bytes_per_pixel
+    total_bytes_estimate = total_pixels * bytes_per_pixel
+
+    warnings: list[str] = []
+    pixel_warn_threshold = 200_000_000
+    tile_bytes_warn_threshold = 512 * 1024 * 1024
+    total_bytes_warn_threshold = 8 * 1024 * 1024 * 1024
+
+    if max_pixels > pixel_warn_threshold:
+        warnings.append(
+            "Estimated tile grid "
+            f"{max_width}x{max_height} (~{max_pixels:,} px) exceeds "
+            f"{pixel_warn_threshold:,} px; consider higher target resolution."
+        )
+    if tile_bytes_estimate > tile_bytes_warn_threshold:
+        warnings.append(
+            "Estimated tile size "
+            f"{_format_bytes(tile_bytes_estimate)} exceeds "
+            f"{_format_bytes(tile_bytes_warn_threshold)}; expect heavy disk/RAM usage."
+        )
+    if total_bytes_estimate > total_bytes_warn_threshold:
+        warnings.append(
+            "Estimated normalized tiles "
+            f"{_format_bytes(total_bytes_estimate)} exceeds "
+            f"{_format_bytes(total_bytes_warn_threshold)}; consider splitting the build."
+        )
+
+    density = options.get("density", "medium")
+    warn_limit = options.get("triangle_warn")
+    max_limit = options.get("triangle_max")
+    if warn_limit is None or max_limit is None:
+        try:
+            limits = triangle_limits_for_preset(density)
+        except ValueError:
+            limits = triangle_limits_for_preset("medium")
+        warn_limit = warn_limit if warn_limit is not None else limits["warn"]
+        max_limit = max_limit if max_limit is not None else limits["max"]
+
+    if triangles_per_tile:
+        if max_limit is not None and triangles_per_tile > max_limit:
+            warnings.append(
+                f"Estimated triangles per tile {triangles_per_tile:,} exceed max "
+                f"{max_limit:,} before normalization."
+            )
+        elif warn_limit is not None and triangles_per_tile > warn_limit:
+            warnings.append(
+                f"Estimated triangles per tile {triangles_per_tile:,} exceed warn "
+                f"{warn_limit:,} before normalization."
+            )
+        total_warn = warn_limit * len(tiles) if warn_limit is not None else None
+        total_max = max_limit * len(tiles) if max_limit is not None else None
+        if total_max is not None and triangles_total > total_max:
+            warnings.append(
+                f"Estimated total triangles {triangles_total:,} exceed {total_max:,} "
+                f"across {len(tiles)} tiles."
+            )
+        elif total_warn is not None and triangles_total > total_warn:
+            warnings.append(
+                f"Estimated total triangles {triangles_total:,} exceed {total_warn:,} "
+                f"across {len(tiles)} tiles."
+            )
+
+    estimates = {
+        "tile_width": max_width,
+        "tile_height": max_height,
+        "tile_pixels": max_pixels,
+        "tile_bytes_estimate": tile_bytes_estimate,
+        "total_pixels": total_pixels,
+        "total_bytes_estimate": total_bytes_estimate,
+        "triangles_per_tile_estimate": triangles_per_tile,
+        "triangles_total_estimate": triangles_total,
+        "bytes_per_pixel_estimate": bytes_per_pixel,
+        "resolution": [res_x, res_y],
+        "tile_count": len(tiles),
+    }
+    return estimates, warnings
 
 
 def _apply_coverage_metrics(report: dict[str, Any], coverage_metrics: Mapping[str, Any]) -> None:
@@ -635,6 +794,8 @@ def run_build(
     _validate_build_inputs(tiles=tiles, dem_paths=dem_paths, options=options)
     requested_tiles = list(tiles)
     normalization_errors: dict[str, str] = {}
+    guardrail_estimates: dict[str, Any] | None = None
+    guardrail_warnings: list[str] = []
     coverage_min = options.get("coverage_min")
     tiles_for_backend = tiles
     request = BuildRequest(
@@ -669,19 +830,30 @@ def run_build(
                 backend_profile = profile_for_backend(backend_name)
                 target_crs = options.get("target_crs") or backend_spec.tile_dem_crs
                 resolution = _resolution_from_options(options, tiles, target_crs)
+                guardrail_estimates, guardrail_warnings = _estimate_build_guardrails(
+                    tiles,
+                    target_crs=target_crs,
+                    resolution=resolution,
+                    options=options,
+                )
                 fill_strategy = options.get("fill_strategy", "none")
                 fill_value = float(options.get("fill_value", 0.0) or 0.0)
                 fallback_dem_paths = [
                     Path(path) for path in options.get("fallback_dem_paths") or []
                 ]
-                tile_jobs = int(options.get("tile_jobs", 1) or 1)
+                tile_jobs_value = options.get("tile_jobs", 1)
+                tile_jobs = int(1 if tile_jobs_value is None else tile_jobs_value)
                 if tile_jobs < 0:
                     raise ValueError("tile_jobs must be >= 0")
                 continue_on_error = bool(options.get("continue_on_error", False))
                 coverage_metrics_enabled = bool(
-                    options.get("coverage_metrics", True) or coverage_min is not None
+                    options.get("coverage_metrics", True)
+                    or coverage_min is not None
+                    or (backend_profile and backend_profile.require_full_coverage)
                 )
                 mosaic_strategy = options.get("mosaic_strategy", "full")
+                compression = _normalize_compression(options.get("normalized_compression"))
+                cache_sha256 = bool(options.get("cache_sha256", False))
                 cache_options = _normalization_cache_options(
                     target_crs=target_crs,
                     resampling=options.get("resampling", "bilinear"),
@@ -691,31 +863,57 @@ def run_build(
                     fill_value=fill_value,
                     backend_profile=backend_profile,
                     dem_stack=options.get("dem_stack"),
+                    mosaic_strategy=mosaic_strategy,
+                    normalized_compression=compression,
                 )
                 fallback_sources = fallback_dem_paths if fill_strategy == "fallback" else []
                 normalization_cache = load_normalization_cache(output_dir / "normalized")
-                cache_hit = normalization_cache is not None and normalization_cache.matches(
-                    sources=dem_paths,
-                    fallback_sources=fallback_sources,
-                    options=cache_options,
-                    tiles=tiles,
+                cached_tile_paths: dict[str, str] = {}
+                cached_tile_fingerprints: dict[str, SourceFingerprint] = {}
+                cached_coverage: dict[str, CoverageMetrics] = {}
+                pending_tiles = list(tiles)
+                cache_compatible = (
+                    normalization_cache is not None
+                    and normalization_cache.matches_inputs(
+                        sources=dem_paths,
+                        fallback_sources=fallback_sources,
+                        options=cache_options,
+                        validate_hashes=cache_sha256,
+                    )
                 )
+                if cache_compatible and normalization_cache is not None:
+                    cached_tile_paths, pending_tiles = normalization_cache.resolve_tiles(
+                        tiles,
+                        validate_hashes=cache_sha256,
+                    )
+                    cached_tile_fingerprints = {
+                        tile: normalization_cache.tile_fingerprints[tile]
+                        for tile in cached_tile_paths
+                        if tile in normalization_cache.tile_fingerprints
+                    }
+                    if coverage_metrics_enabled:
+                        cached_coverage = {
+                            tile: normalization_cache.coverage[tile]
+                            for tile in cached_tile_paths
+                            if tile in normalization_cache.coverage
+                        }
+                cached_tiles = [tile for tile in tiles if tile in cached_tile_paths]
                 tiles_for_backend = tiles
                 with perf.span("normalize"):
-                    if cache_hit and normalization_cache is not None:
-                        coverage_metrics = (
-                            normalization_cache.coverage if coverage_metrics_enabled else {}
-                        )
+                    if cache_compatible and not pending_tiles and normalization_cache is not None:
+                        coverage_metrics = cached_coverage if coverage_metrics_enabled else {}
                         options = {
                             **options,
-                            "tile_dem_paths": dict(normalization_cache.tile_paths),
-                            "mosaic_path": normalization_cache.mosaic_path,
+                            "tile_dem_paths": dict(cached_tile_paths),
                         }
+                        if normalization_cache.mosaic_valid(validate_hashes=cache_sha256):
+                            options["mosaic_path"] = normalization_cache.mosaic_path
                     else:
+                        target_tiles = pending_tiles if pending_tiles else tiles
                         if stack:
                             normalization = normalize_stack_for_tiles(
                                 stack,
-                                tiles,
+                                target_tiles,
                                 output_dir / "normalized",
                                 target_crs=target_crs,
                                 resampling=options.get("resampling", "bilinear"),
@@ -729,11 +927,12 @@ def run_build(
                                 continue_on_error=continue_on_error,
                                 coverage_metrics=coverage_metrics_enabled,
                                 mosaic_strategy=mosaic_strategy,
+                                compression=compression,
                             )
                         else:
                             normalization = normalize_for_tiles(
                                 dem_paths,
-                                tiles,
+                                target_tiles,
                                 output_dir / "normalized",
                                 target_crs=target_crs,
                                 resampling=options.get("resampling", "bilinear"),
@@ -747,29 +946,29 @@ def run_build(
                                 continue_on_error=continue_on_error,
                                 coverage_metrics=coverage_metrics_enabled,
                                 mosaic_strategy=mosaic_strategy,
+                                compression=compression,
                             )
                         normalization_errors = dict(normalization.errors)
                         if normalization_errors:
-                            tiles_for_backend = [
-                                tile for tile in tiles if tile not in normalization_errors
+                            ok_tiles = [
+                                tile for tile in target_tiles if tile not in normalization_errors
                             ]
+                        else:
+                            ok_tiles = target_tiles
+                        tiles_for_backend = cached_tiles + ok_tiles
                         coverage_metrics = (
-                            normalization.coverage if coverage_metrics_enabled else {}
+                            {**cached_coverage, **normalization.coverage}
+                            if coverage_metrics_enabled
+                            else {}
                         )
-                        if not normalization_errors:
-                            cache = _build_normalization_cache(
-                                normalization,
-                                options=cache_options,
-                                fallback_sources=fallback_sources,
-                                tiles=tiles,
-                            )
-                            write_normalization_cache(output_dir / "normalized", cache)
+                        new_tile_paths = {
+                            tile_result.tile: str(tile_result.path)
+                            for tile_result in normalization.tile_results
+                        }
+                        merged_tile_paths = {**cached_tile_paths, **new_tile_paths}
                         options = {
                             **options,
-                            "tile_dem_paths": {
-                                tile_result.tile: str(tile_result.path)
-                                for tile_result in normalization.tile_results
-                            },
+                            "tile_dem_paths": merged_tile_paths,
                             "mosaic_path": str(normalization.mosaic_path),
                         }
                         if normalization_errors:
@@ -777,6 +976,37 @@ def run_build(
                                 **options,
                                 "normalization_errors": normalization_errors,
                             }
+                        if not normalization_errors:
+                            merged_fingerprints = {
+                                **cached_tile_fingerprints,
+                                **fingerprint_path_map(
+                                    {tile: Path(path) for tile, path in new_tile_paths.items()},
+                                    compute_sha256=cache_sha256,
+                                ),
+                            }
+                            merged_coverage = {**cached_coverage, **normalization.coverage}
+                            mosaic_path = Path(normalization.mosaic_path).resolve()
+                            cache = NormalizationCache(
+                                version=CACHE_VERSION,
+                                sources=fingerprint_paths(dem_paths, compute_sha256=cache_sha256),
+                                fallback_sources=fingerprint_paths(
+                                    fallback_sources,
+                                    compute_sha256=cache_sha256,
+                                ),
+                                options=dict(cache_options),
+                                tiles=tuple(tiles),
+                                tile_paths=merged_tile_paths,
+                                tile_fingerprints=merged_fingerprints,
+                                mosaic_path=str(mosaic_path),
+                                mosaic_fingerprint=SourceFingerprint.from_path(
+                                    mosaic_path,
+                                    compute_sha256=cache_sha256,
+                                )
+                                if mosaic_path.exists()
+                                else None,
+                                coverage=merged_coverage,
+                            )
+                            write_normalization_cache(output_dir / "normalized", cache)
                 request = BuildRequest(
                     tiles=tuple(tiles_for_backend),
                     dem_paths=tuple(dem_paths),
@@ -853,7 +1083,14 @@ def run_build(
     if result is None:  # pragma: no cover - defensive guard
         raise RuntimeError("Build did not produce a report.")
 
-    report = _attach_performance(dict(result.build_report), perf, output_dir, options)
+    report = dict(result.build_report)
+    if guardrail_estimates:
+        artifacts = dict(report.get("artifacts", {}))
+        artifacts.setdefault("estimates", guardrail_estimates)
+        report["artifacts"] = artifacts
+    if guardrail_warnings:
+        report.setdefault("warnings", []).extend(guardrail_warnings)
+    report = _attach_performance(report, perf, output_dir, options)
     result = BuildResult(build_plan=result.build_plan, build_report=report)
     bundle_path = None
     if options.get("bundle_diagnostics"):

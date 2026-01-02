@@ -83,6 +83,10 @@ dem2dsf build --dem dem.tif --tile +47+008 --output build
 
 Build outputs include `build/build_plan.json` and `build/build_report.json`.
 Use `--tile-jobs 4` to parallelize per-tile normalization work.
+Use `--tile-jobs 0` to auto-size workers, `--mosaic-strategy vrt` for VRT mosaics,
+and `--normalized-compression lzw` to shrink normalized tiles.
+Add `--cache-sha256` for stricter cache validation and `--skip-coverage-metrics`
+for faster normalization.
 
 ### AutoOrtho mode
 
