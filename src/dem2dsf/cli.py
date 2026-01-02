@@ -1140,6 +1140,12 @@ def _add_publish_parser(subparsers: argparse._SubParsersAction) -> None:
         help="Zip file output path.",
     )
     publish.add_argument(
+        "--mode",
+        choices=("full", "scenery"),
+        default="full",
+        help="Publish mode: full includes all artifacts; scenery keeps essentials only.",
+    )
+    publish.add_argument(
         "--dsf-7z",
         action="store_true",
         help="Compress DSF files with 7z before packaging.",
@@ -1551,6 +1557,7 @@ def main(argv: list[str] | None = None) -> int:
         result = publish_build(
             Path(args.build_dir),
             Path(args.output),
+            mode=args.mode,
             dsf_7z=args.dsf_7z,
             dsf_7z_backup=args.dsf_7z_backup,
             sevenzip_path=sevenzip_path,

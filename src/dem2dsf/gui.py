@@ -303,6 +303,7 @@ def publish_form_to_request(
     output_zip = Path(values.get("output_zip") or "build.zip")
     sevenzip = values.get("sevenzip_path")
     options = {
+        "mode": values.get("mode") or "full",
         "dsf_7z": bool(values.get("dsf_7z", False)),
         "dsf_7z_backup": bool(values.get("dsf_7z_backup", False)),
         "sevenzip_path": Path(sevenzip) if sevenzip else None,
@@ -388,6 +389,7 @@ def launch_gui() -> None:
     publish_vars = {
         "build_dir": tk.StringVar(value="build"),
         "output_zip": tk.StringVar(value="build.zip"),
+        "mode": tk.StringVar(value="full"),
         "dsf_7z": tk.BooleanVar(value=False),
         "dsf_7z_backup": tk.BooleanVar(value=False),
         "sevenzip_path": tk.StringVar(),
@@ -947,11 +949,17 @@ def launch_gui() -> None:
             ),
         ),
     )
+    mode_box = ttk.Combobox(
+        publish_frame,
+        textvariable=publish_vars["mode"],
+        values=["full", "scenery"],
+    )
+    add_row(publish_frame, "Publish mode", mode_box, 2)
     add_row_with_button(
         publish_frame,
         "7z path",
         sevenzip_entry,
-        2,
+        3,
         ttk.Button(
             publish_frame,
             text="Browse",
@@ -965,19 +973,19 @@ def launch_gui() -> None:
         publish_frame,
         text="Compress DSFs (7z)",
         variable=publish_vars["dsf_7z"],
-    ).grid(row=3, column=1, sticky="w", padx=4, pady=4)
+    ).grid(row=4, column=1, sticky="w", padx=4, pady=4)
     ttk.Checkbutton(
         publish_frame,
         text="Keep uncompressed DSF backups",
         variable=publish_vars["dsf_7z_backup"],
-    ).grid(row=4, column=1, sticky="w", padx=4, pady=4)
+    ).grid(row=5, column=1, sticky="w", padx=4, pady=4)
     ttk.Checkbutton(
         publish_frame,
         text="Allow missing 7z",
         variable=publish_vars["allow_missing_7z"],
-    ).grid(row=5, column=1, sticky="w", padx=4, pady=4)
+    ).grid(row=6, column=1, sticky="w", padx=4, pady=4)
     ttk.Button(publish_frame, text="Publish", command=on_publish).grid(
-        row=6, column=1, sticky="e", padx=4, pady=8
+        row=7, column=1, sticky="e", padx=4, pady=8
     )
 
     log = tk.Text(root, height=6, width=80)

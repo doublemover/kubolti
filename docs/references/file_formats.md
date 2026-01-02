@@ -16,8 +16,8 @@ DEM2DSF moves data through multiple formats. Understanding what each file encode
 - Build artifacts:
   - `build_plan.json`: inputs, backend, options, and provenance.
   - `build_report.json`: per-tile status, warnings/errors, artifacts.
-  - `manifest.json`: file list + hashes for published builds.
-  - `audit_report.json`: counts, sizes, DSF compression summary.
+  - `manifest.json`: file list + hashes for published builds plus publish mode metadata.
+  - `audit_report.json`: counts, sizes, publish mode, DSF compression summary, tool versions.
 - Tool discovery:
 - `tools/tool_paths.json` maps tool names to executable/script paths (dsftool, ddstool, ortho4xp, 7zip).
 - DEM stack config (`dem_stack.json`):

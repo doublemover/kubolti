@@ -25,6 +25,16 @@ The GitHub Actions workflow `release.yml` signs artifacts if secrets are present
 Without these secrets, the workflow still produces unsigned artifacts and publishes them to the release.
 The release workflow also builds GUI bundles for Linux, macOS, and Windows and attaches them to tagged releases.
 
+## GUI bundle contents
+GUI bundles include the dem2dsf GUI, CLI entrypoints, and the Ortho4XP runner script.
+They do **not** bundle Ortho4XP, XPTools (DSFTool/DDSTool), or 7-Zip. Provide a
+`tools/tool_paths.json` (or set `DEM2DSF_TOOL_PATHS`) so the GUI can discover
+your local tool installs.
+
+## Portable config templates
+- `docs/tool_paths.template.json` is a portable template for tool discovery.
+- Use `python scripts/install_tools.py --write-config` to generate a real config.
+
 ## Tool discovery on clean systems
 Run `python scripts/install_tools.py --write-config` to generate `tools/tool_paths.json`.
 The CLI auto-loads this file (or you can set `DEM2DSF_TOOL_PATHS` to point at it)

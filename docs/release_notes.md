@@ -21,6 +21,7 @@ content matches the scope below.
 - `ultra` density preset and mosaic strategy selection (full vs per-tile).
 - Normalization cache reuse keyed by DEM inputs and parameters.
 - GUI preferences persistence plus expanded runner controls.
+- Publish modes (`--mode full` vs `--mode scenery`) for packaging essentials only.
 
 #### Changed
 - Ortho4XP config overrides restore by default; opt in to persist changes.

@@ -10,3 +10,5 @@ This project targets Python 3.13 and the toolchain versions below. Update this l
 Notes:
 - External tools are BYO binaries; `scripts/install_tools.py` can fetch XPTools zips.
 - Version changes should be reflected in build reports for reproducibility.
+- See `compatibility.md` for supported platforms and tool policy.
+- Newer tool versions are allowed but should be treated as unvalidated until verified.

@@ -45,12 +45,18 @@ def test_gui_prefs_roundtrip(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setenv(gui.ENV_GUI_PREFS, str(prefs_path))
     payload = {
         "build": {"tiles": "+47+008", "dry_run": True},
-        "publish": {"output_zip": "build.zip", "dsf_7z": True, "dsf_7z_backup": True},
+        "publish": {
+            "output_zip": "build.zip",
+            "mode": "scenery",
+            "dsf_7z": True,
+            "dsf_7z_backup": True,
+        },
     }
     gui.save_gui_prefs(payload)
     loaded = gui.load_gui_prefs()
     assert loaded["build"]["tiles"] == "+47+008"
     assert loaded["build"]["dry_run"] is True
+    assert loaded["publish"]["mode"] == "scenery"
     assert loaded["publish"]["dsf_7z"] is True
     assert loaded["publish"]["dsf_7z_backup"] is True
 
@@ -296,6 +302,7 @@ def test_publish_form_to_request() -> None:
     values = {
         "build_dir": "build",
         "output_zip": "out.zip",
+        "mode": "scenery",
         "dsf_7z": True,
         "dsf_7z_backup": True,
         "sevenzip_path": "7z",
@@ -304,6 +311,7 @@ def test_publish_form_to_request() -> None:
     build_dir, output_zip, options = gui.publish_form_to_request(values)
     assert build_dir == Path("build")
     assert output_zip == Path("out.zip")
+    assert options["mode"] == "scenery"
     assert options["dsf_7z"] is True
     assert options["dsf_7z_backup"] is True
 

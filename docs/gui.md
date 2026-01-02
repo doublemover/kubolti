@@ -32,6 +32,7 @@ the location with `DEM2DSF_GUI_PREFS`.
 
 ## Publish tab highlights
 - Browse buttons fill build/output paths.
+- Publish mode toggles between full archives and scenery-only packages.
 - Optional 7z compression can be enabled with a detected or selected 7z path.
   Use the backup toggle to keep `.dsf.uncompressed` files after compression.
 

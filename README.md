@@ -22,13 +22,25 @@ python -m pip install -e .
 dem2dsf --help
 ```
 
+## Install options
+
+- Venv (above) keeps everything inside the repo.
+- pipx for an isolated CLI install:
+
+```bash
+pipx install .
+```
+
 ## Documentation
 
 - `docs/README.md` for the full documentation map.
+- `docs/compatibility.md` for supported platforms and tool version policy.
 - `docs/Ortho4XP/README.md` for Ortho4XP workflow notes and automation checks.
 - `docs/DSFTool/README.md` for DSFTool usage and gotchas.
 - `docs/presets.md`, `docs/dem_stack.md`, and `docs/patch_workflow.md` for
   presets, DEM stacks, and patch workflows.
+- `docs/quickstarts/` for platform-specific setup steps.
+- `docs/security_posture.md` for download/extraction trust assumptions.
 
 ## Current capabilities
 
@@ -61,6 +73,7 @@ DEM2DSF orchestrates external tools you provide:
 
 Tool discovery loads `tools/tool_paths.json` from the repo or current working
 folder, or an explicit file set in `DEM2DSF_TOOL_PATHS`.
+See `docs/tool_paths.template.json` for a portable template.
 
 Install/build helpers:
 
@@ -153,6 +166,9 @@ dem2dsf build --dem dem.tif --tile +47+008 --output build \
 ```bash
 dem2dsf publish --build-dir build --output build.zip --dsf-7z
 ```
+
+Use `--mode scenery` to include only the X-Plane scenery essentials
+(`Earth nav data`, `terrain`, `textures`) plus build plan/report metadata.
 
 Add `--dsf-7z-backup` to keep `.dsf.uncompressed` backups or
 `--sevenzip-path <path-to-7z>` to override detection.

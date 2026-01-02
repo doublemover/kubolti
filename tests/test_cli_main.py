@@ -432,6 +432,7 @@ def test_cli_publish_uses_tool_paths(monkeypatch, tmp_path: Path) -> None:
     )
     assert result == 0
     assert captured["sevenzip_path"] == sevenzip
+    assert captured["mode"] == "full"
 
 
 def test_cli_autoortho_uses_tool_paths(monkeypatch, tmp_path: Path) -> None:
@@ -608,6 +609,7 @@ def test_cli_publish_detected_7z(monkeypatch, tmp_path: Path) -> None:
     )
     assert result == 0
     assert captured["sevenzip_path"] == Path("7z.exe")
+    assert captured["mode"] == "full"
 
 
 def test_cli_publish_prompt_for_7z(monkeypatch, tmp_path: Path) -> None:
@@ -634,6 +636,31 @@ def test_cli_publish_prompt_for_7z(monkeypatch, tmp_path: Path) -> None:
     )
     assert result == 0
     assert captured["sevenzip_path"] == Path("C:/fake/7z.exe")
+    assert captured["mode"] == "full"
+
+
+def test_cli_publish_mode(monkeypatch, tmp_path: Path) -> None:
+    captured = {}
+
+    def fake_publish_build(*_args, **kwargs):
+        captured.update(kwargs)
+        return {"zip_path": "out.zip", "warnings": []}
+
+    monkeypatch.setattr(cli, "publish_build", fake_publish_build)
+
+    result = cli.main(
+        [
+            "publish",
+            "--build-dir",
+            str(tmp_path),
+            "--output",
+            str(tmp_path / "out.zip"),
+            "--mode",
+            "scenery",
+        ]
+    )
+    assert result == 0
+    assert captured["mode"] == "scenery"
 
 
 def test_cli_publish_prompt_blank_requires_allow(monkeypatch, tmp_path: Path) -> None:

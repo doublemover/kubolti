@@ -1,0 +1,6 @@
+{
+  "ortho4xp": "/path/to/Ortho4XP/Ortho4XP.py",
+  "dsftool": "/path/to/XPTools/DSFTool",
+  "ddstool": "/path/to/XPTools/DDSTool",
+  "7zip": "/path/to/7z"
+}

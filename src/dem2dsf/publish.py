@@ -13,6 +13,12 @@ from pathlib import Path, PosixPath
 from typing import Any, Iterable
 from zipfile import ZIP_DEFLATED, ZipFile
 
+PUBLISH_MODES = ("full", "scenery")
+SCENERY_DIRS = ("Earth nav data", "terrain", "textures")
+SCENERY_FILES = ("library.txt", "library.dat", "library.xml")
+REPORT_FILES = ("build_plan.json", "build_report.json")
+SCENERY_EXCLUDE_SUFFIXES = (".uncompressed",)
+
 
 def _utc_now() -> str:
     """Return the current UTC timestamp as ISO8601."""
@@ -109,10 +115,54 @@ def _compress_dsf_archives(
     return errors
 
 
+def _sevenzip_version(sevenzip_path: Path | None) -> str | None:
+    if not sevenzip_path:
+        return None
+    command_prefix = _sevenzip_command(sevenzip_path)
+    for args in (command_prefix + ["-version"], command_prefix + ["--version"], command_prefix):
+        result = subprocess.run(args, capture_output=True, text=True, check=False)
+        output = (result.stdout or result.stderr).strip()
+        if output:
+            return output.splitlines()[0].strip() or None
+    return None
+
+
+def _collect_publish_files(
+    build_dir: Path,
+    *,
+    mode: str,
+    warnings: list[str],
+) -> list[Path]:
+    if mode == "full":
+        return sorted(path for path in build_dir.rglob("*") if path.is_file())
+    if mode != "scenery":
+        raise ValueError(f"Unknown publish mode: {mode}")
+    files: set[Path] = set()
+    for name in SCENERY_DIRS:
+        root = build_dir / name
+        if root.exists():
+            files.update(path for path in root.rglob("*") if path.is_file())
+        elif name == "Earth nav data":
+            warnings.append("Earth nav data folder missing; scenery output may be incomplete.")
+    for name in SCENERY_FILES + REPORT_FILES:
+        candidate = build_dir / name
+        if candidate.exists():
+            files.add(candidate)
+        elif name in REPORT_FILES:
+            warnings.append(f"Missing report file: {name}.")
+    filtered: list[Path] = []
+    for path in files:
+        if path.suffix in SCENERY_EXCLUDE_SUFFIXES:
+            continue
+        filtered.append(path)
+    return sorted(filtered)
+
+
 def publish_build(
     build_dir: Path,
     output_zip: Path,
     *,
+    mode: str = "full",
     dsf_7z: bool = False,
     dsf_7z_backup: bool = False,
     sevenzip_path: Path | None = None,
@@ -123,8 +173,10 @@ def publish_build(
         raise FileNotFoundError(f"Build directory not found: {build_dir}")
 
     warnings: list[str] = []
+    if mode not in PUBLISH_MODES:
+        raise ValueError(f"Unsupported publish mode: {mode}")
+
     dsf_paths = sorted(path for path in build_dir.rglob("*.dsf") if path.is_file())
-    dsf_count = len(dsf_paths)
     dsf_7z_count = 0
     sevenzip_used: Path | None = None
     if dsf_7z:
@@ -145,9 +197,11 @@ def publish_build(
                 raise RuntimeError("7z compression failed: " + "; ".join(errors))
             dsf_7z_count = len(dsf_paths)
 
+    publish_files = _collect_publish_files(build_dir, mode=mode, warnings=warnings)
+
     files: list[dict[str, Any]] = []
     total_bytes = 0
-    for file_path in sorted(path for path in build_dir.rglob("*") if path.is_file()):
+    for file_path in publish_files:
         rel_path = file_path.relative_to(build_dir)
         size = file_path.stat().st_size
         total_bytes += size
@@ -159,9 +213,22 @@ def publish_build(
             }
         )
 
+    tool_versions = {
+        "sevenzip": _sevenzip_version(sevenzip_used),
+    }
+    dsf_count = len([path for path in publish_files if path.suffix == ".dsf"])
+
     manifest = {
         "created_at": _utc_now(),
         "build_dir": str(build_dir),
+        "publish_mode": mode,
+        "tool_versions": tool_versions,
+        "dsf_7z": {
+            "enabled": bool(dsf_7z and sevenzip_used),
+            "count": dsf_7z_count,
+            "backup": bool(dsf_7z_backup),
+            "backup_suffix": ".uncompressed" if dsf_7z_backup else None,
+        },
         "files": files,
     }
     manifest_path = build_dir / "manifest.json"
@@ -170,13 +237,16 @@ def publish_build(
     audit = {
         "created_at": _utc_now(),
         "build_dir": str(build_dir),
+        "publish_mode": mode,
         "total_files": len(files),
         "total_bytes": total_bytes,
         "dsf_count": dsf_count,
+        "tool_versions": tool_versions,
         "dsf_7z": {
             "enabled": bool(dsf_7z and sevenzip_used),
             "count": dsf_7z_count,
             "sevenzip_path": str(sevenzip_used) if sevenzip_used else None,
+            "sevenzip_version": tool_versions.get("sevenzip"),
             "backup": bool(dsf_7z_backup),
             "backup_suffix": ".uncompressed" if dsf_7z_backup else None,
             "warnings": warnings,
@@ -185,8 +255,13 @@ def publish_build(
     audit_path = build_dir / "audit_report.json"
     audit_path.write_text(json.dumps(audit, indent=2), encoding="utf-8")
 
+    package_files = list(publish_files)
+    package_files.extend([manifest_path, audit_path])
+    package_files = sorted({path.resolve(): path for path in package_files}.values())
+    package_files = [path for path in package_files if path.exists()]
+
     with ZipFile(output_zip, "w", compression=ZIP_DEFLATED) as archive:
-        for file_path in sorted(path for path in build_dir.rglob("*") if path.is_file()):
+        for file_path in package_files:
             archive.write(file_path, file_path.relative_to(build_dir))
 
     return {

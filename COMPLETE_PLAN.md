@@ -197,7 +197,7 @@ Status legend: planned | in-progress | done. Update the status tags as work land
   - triangle explosion warnings based on resolution + tile count
 - Reconcile `docs/references/file_formats.md` VRT mosaic mention with current GeoTIFF mosaic behavior (implement VRT mosaics or update docs).
 
-## Phase 17 — Packaging & Distribution Improvements (planned)
+## Phase 17 — Packaging & Distribution Improvements (done)
 - Publish modes:
   - `publish --mode scenery` (essentials only)
   - `publish --mode full` (current behavior)
