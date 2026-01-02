@@ -7,6 +7,8 @@ from pathlib import Path
 
 import pytest
 
+from dem2dsf import contracts
+
 
 def _load_runner():
     return importlib.import_module("dem2dsf.runners.ortho4xp")
@@ -177,6 +179,17 @@ def test_parse_runner_events() -> None:
     assert any(event["event"] == "dsf_compiled" for event in events)
     assert any(event["event"] == "download" for event in events)
     assert any(event["event"] == "overlay" for event in events)
+
+
+def test_build_runner_event_payload_schema() -> None:
+    module = _load_runner()
+    payload = module.build_runner_event_payload(
+        tile="+47+008",
+        attempt=1,
+        stdout="Step 1: Assemble vector data\n",
+        stderr="",
+    )
+    contracts.validate_runner_events(payload)
 
 
 def test_runner_env_includes_repo_src(tmp_path: Path, monkeypatch) -> None:

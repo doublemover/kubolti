@@ -73,8 +73,16 @@ def run_command(
                 stdout_handle.close()
             if stderr_handle:
                 stderr_handle.close()
-        stdout = _tail_text(stdout_path, max_bytes=tail_bytes, max_lines=tail_lines) if stdout_path else ""
-        stderr = _tail_text(stderr_path, max_bytes=tail_bytes, max_lines=tail_lines) if stderr_path else ""
+        stdout = (
+            _tail_text(stdout_path, max_bytes=tail_bytes, max_lines=tail_lines)
+            if stdout_path
+            else ""
+        )
+        stderr = (
+            _tail_text(stderr_path, max_bytes=tail_bytes, max_lines=tail_lines)
+            if stderr_path
+            else ""
+        )
         if timed_out:
             timeout_message = f"Command timed out after {timeout} seconds."
             stderr = f"{stderr}\n{timeout_message}" if stderr else timeout_message

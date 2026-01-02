@@ -1,1 +1,1 @@
-"""Schema package for build plan and report validation."""
+"""Schema package for build plan, report, and runner event validation."""

@@ -28,6 +28,9 @@ DEM2DSF moves data through multiple formats. Understanding what each file encode
   - `schema_version` + `patches` list with `tile`, `dem`, optional `aoi`, optional `nodata`.
 - Overlay report (`overlay_report.json`):
   - generator name, artifacts, warnings/errors, tiles.
+- Runner events (`*.events.json`):
+  - schema version, runner name, optional tile/attempt, and structured events
+    with stream/line context.
 - DSF2Text rules (DSFTool):
   - `DIVISIONS`, `HEIGHTS`, and `PROPERTY` should precede other commands.
   - Tile bounds properties (`sim/west`, `sim/south`, `sim/east`, `sim/north`) must

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import sys
 from pathlib import Path
 from zipfile import ZipFile
@@ -26,7 +27,10 @@ def test_bundle_diagnostics_writes_zip(tmp_path: Path, monkeypatch) -> None:
     log_dir = build_dir / "runner_logs"
     log_dir.mkdir()
     (log_dir / "ortho.stdout.log").write_text("log", encoding="utf-8")
-    (log_dir / "ortho.events.json").write_text("[]", encoding="utf-8")
+    (log_dir / "ortho.events.json").write_text(
+        json.dumps({"schema_version": "1", "runner": "ortho4xp", "events": []}),
+        encoding="utf-8",
+    )
 
     profile_dir = tmp_path / "profiles"
     profile_dir.mkdir()

@@ -37,14 +37,16 @@ python -m dem2dsf overlay \
 
 ## Plugin interface
 Provide a Python file that exposes either `PLUGIN` or a `register(registry)`
-function. The plugin object must have a `name` attribute and a `generate()`
+function. The plugin object must have a `name` attribute, an
+`interface_version` matching `OVERLAY_INTERFACE_VERSION`, and a `generate()`
 method that returns `OverlayResult`.
 
 ```python
-from dem2dsf.overlay import OverlayResult
+from dem2dsf.overlay import OVERLAY_INTERFACE_VERSION, OverlayResult
 
 class Demo:
     name = "demo"
+    interface_version = OVERLAY_INTERFACE_VERSION
 
     def generate(self, request):
         return OverlayResult(
@@ -62,3 +64,8 @@ Invoke with:
 ```bash
 python -m dem2dsf overlay --generator demo --plugin ./demo_plugin.py --output overlay_out
 ```
+
+## Entrypoints
+Overlay generators can be registered via package entrypoints using the group
+`dem2dsf.overlays`. Each entrypoint should resolve to a generator instance or a
+callable that returns one. The generator name is used by `--generator`.

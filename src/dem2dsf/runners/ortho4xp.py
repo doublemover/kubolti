@@ -9,7 +9,9 @@ import os
 import re
 import subprocess
 from pathlib import Path
+from typing import Any
 
+from dem2dsf.contracts import RUNNER_EVENTS_SCHEMA_VERSION
 from dem2dsf.logging_utils import LogOptions, configure_logging
 from dem2dsf.tools.ortho4xp import (
     TARGET_ORTHO4XP_VERSION,
@@ -134,7 +136,12 @@ def _write_logs(
     suffix = "" if attempt == 1 else f".attempt{attempt}"
     (log_dir / f"ortho4xp_{tile}{suffix}.stdout.log").write_text(result.stdout, encoding="utf-8")
     (log_dir / f"ortho4xp_{tile}{suffix}.stderr.log").write_text(result.stderr, encoding="utf-8")
-    events = parse_runner_events(result.stdout, result.stderr)
+    events = build_runner_event_payload(
+        tile=tile,
+        attempt=attempt,
+        stdout=result.stdout,
+        stderr=result.stderr,
+    )
     (log_dir / f"ortho4xp_{tile}{suffix}.events.json").write_text(
         json.dumps(events, indent=2), encoding="utf-8"
     )
@@ -156,6 +163,7 @@ TRIANGLE_FAILURE_PATTERN = re.compile(
     re.IGNORECASE,
 )
 LOGGER = logging.getLogger("dem2dsf.runner")
+RUNNER_NAME = "ortho4xp"
 
 
 def _event_from_line(line: str) -> dict[str, str] | None:
@@ -194,6 +202,20 @@ def parse_runner_events(stdout: str, stderr: str) -> list[dict[str, str | int]]:
                 }
             )
     return events
+
+
+def build_runner_event_payload(
+    *, tile: str, attempt: int, stdout: str, stderr: str
+) -> dict[str, Any]:
+    """Build a versioned runner events payload."""
+    events = parse_runner_events(stdout, stderr)
+    return {
+        "schema_version": RUNNER_EVENTS_SCHEMA_VERSION,
+        "runner": RUNNER_NAME,
+        "tile": tile,
+        "attempt": attempt,
+        "events": events,
+    }
 
 
 def _runner_env() -> dict[str, str]:

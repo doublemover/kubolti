@@ -49,7 +49,8 @@ def _build_vrt_mosaic(
         height = max(1, int(math.ceil((max_y - min_y) / res_y)))
         transform = from_origin(min_x, max_y, res_x, res_y)
         geotransform = ", ".join(
-            f"{value:.10f}" for value in transform.to_gdal()  # type: ignore[reportAttributeAccessIssue]
+            f"{value:.10f}"
+            for value in transform.to_gdal()  # type: ignore[reportAttributeAccessIssue]
         )
         srs = crs.to_wkt()
         if srs:

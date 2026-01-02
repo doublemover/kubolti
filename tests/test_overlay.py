@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 
 from dem2dsf.overlay import (
+    OVERLAY_INTERFACE_VERSION,
     OverlayGenerator,
     OverlayRegistry,
     OverlayRequest,
@@ -13,6 +14,7 @@ from dem2dsf.overlay import (
     apply_drape_texture,
     copy_overlay_assets,
     inventory_overlay_assets,
+    load_overlay_entrypoints,
     load_overlay_plugin,
     run_overlay,
 )
@@ -20,6 +22,8 @@ from dem2dsf.xplane_paths import dsf_path as xplane_dsf_path
 
 
 class DummyGenerator:
+    interface_version = OVERLAY_INTERFACE_VERSION
+
     def __init__(self, name: str) -> None:
         self.name = name
 
@@ -58,6 +62,24 @@ def test_overlay_generator_protocol() -> None:
     )
     with pytest.raises(NotImplementedError):
         OverlayGenerator.generate(None, request)  # type: ignore[reportAbstractUsage,reportArgumentType]
+
+
+def test_overlay_registry_rejects_version_mismatch() -> None:
+    class BadGenerator:
+        name = "bad"
+        interface_version = OVERLAY_INTERFACE_VERSION + 1
+
+        def generate(self, request: OverlayRequest) -> OverlayResult:
+            return OverlayResult(
+                generator=self.name,
+                artifacts={},
+                warnings=(),
+                errors=(),
+            )
+
+    registry = OverlayRegistry()
+    with pytest.raises(ValueError, match="interface version mismatch"):
+        registry.register(BadGenerator())
 
 
 def test_apply_drape_texture(tmp_path: Path) -> None:
@@ -103,8 +125,11 @@ def test_load_overlay_plugin(tmp_path: Path) -> None:
             [
                 "from dem2dsf.overlay import OverlayResult",
                 "",
+                "INTERFACE_VERSION = 1",
+                "",
                 "class Dummy:",
                 "    name = 'dummy'",
+                "    interface_version = INTERFACE_VERSION",
                 "    def generate(self, request):",
                 "        return OverlayResult(",
                 "            generator=self.name,",
@@ -131,9 +156,12 @@ def test_load_overlay_plugin_register_hook(tmp_path: Path) -> None:
         "\n".join(
             [
                 "from dem2dsf.overlay import OverlayResult",
+                "",
+                "INTERFACE_VERSION = 1",
                 "def register(registry):",
                 "    class Dummy:",
                 "        name = 'hook'",
+                "        interface_version = INTERFACE_VERSION",
                 "        def generate(self, request):",
                 "            return OverlayResult(",
                 "                generator=self.name,",
@@ -170,8 +198,11 @@ def test_run_overlay_with_plugin(tmp_path: Path) -> None:
             [
                 "from dem2dsf.overlay import OverlayResult",
                 "",
+                "INTERFACE_VERSION = 1",
+                "",
                 "class Dummy:",
                 "    name = 'dummy'",
+                "    interface_version = INTERFACE_VERSION",
                 "    def generate(self, request):",
                 "        return OverlayResult(",
                 "            generator=self.name,",
@@ -488,3 +519,33 @@ def test_run_overlay_unknown_generator(tmp_path: Path) -> None:
             tiles=(),
             options={},
         )
+
+
+def test_load_overlay_entrypoints(monkeypatch) -> None:
+    registry = OverlayRegistry()
+
+    class Plugin:
+        name = "entry"
+        interface_version = OVERLAY_INTERFACE_VERSION
+
+        def generate(self, request: OverlayRequest) -> OverlayResult:
+            return OverlayResult(
+                generator=self.name,
+                artifacts={"ok": True},
+                warnings=(),
+                errors=(),
+            )
+
+    class DummyEntryPoint:
+        name = "entry"
+
+        def load(self):
+            return Plugin
+
+    monkeypatch.setattr(
+        "dem2dsf.overlay.metadata.entry_points",
+        lambda group: [DummyEntryPoint()],
+    )
+    load_overlay_entrypoints(registry)
+
+    assert registry.get("entry") is not None
