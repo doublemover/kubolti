@@ -174,7 +174,7 @@ but you created:
 Copy sidecars to match the enriched text filename:
 
 ```py
-dest_text=enriched_text_path
+dest_text = enriched_text_path
 ```
 
 Or copy to **both** to be extra safe.

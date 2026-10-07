@@ -44,6 +44,7 @@ method that returns `OverlayResult`.
 ```python
 from dem2dsf.overlay import OVERLAY_INTERFACE_VERSION, OverlayResult
 
+
 class Demo:
     name = "demo"
     interface_version = OVERLAY_INTERFACE_VERSION
@@ -55,6 +56,7 @@ class Demo:
             warnings=(),
             errors=(),
         )
+
 
 PLUGIN = Demo()
 ```
