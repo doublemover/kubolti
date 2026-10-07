@@ -1,0 +1,70 @@
+{
+  "version": 1,
+  "timezone": "America/Detroit",
+  "suites": [
+    {
+      "id": "full",
+      "workflow": "maintenance-full.yml",
+      "monthlyDay": 8,
+      "cron": "29 7 * * 0",
+      "paths": [
+        "**"
+      ],
+      "ignorePaths": [
+        "README.md",
+        "CHANGELOG.md",
+        "LICENSE",
+        "docs/**/*.md"
+      ],
+      "protectedPaths": [
+        ".github/**",
+        "docs/contracts/**",
+        "docs/support/**",
+        "docs/specs/**",
+        "docs/fixtures/**"
+      ],
+      "expectedJobs": [
+        {
+          "name": "lint"
+        },
+        {
+          "name": "typecheck"
+        },
+        {
+          "name": "unit (ubuntu-latest, 3.13)"
+        },
+        {
+          "name": "unit (windows-latest, 3.13)"
+        },
+        {
+          "name": "unit (macos-latest, 3.13)"
+        },
+        {
+          "name": "e2e"
+        },
+        {
+          "name": "integration (ubuntu-latest, 3.13)"
+        },
+        {
+          "name": "integration (windows-latest, 3.13)"
+        },
+        {
+          "name": "integration (macos-latest, 3.13)"
+        },
+        {
+          "name": "perf"
+        },
+        {
+          "name": "gui (ubuntu-latest, 3.13)"
+        },
+        {
+          "name": "gui (windows-latest, 3.13)"
+        },
+        {
+          "name": "gui (macos-latest, 3.13)"
+        }
+      ]
+    }
+  ],
+  "sourceRef": "main"
+}
